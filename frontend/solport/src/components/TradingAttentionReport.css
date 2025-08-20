@@ -1,0 +1,317 @@
+/* Trading Attention Report Styles - Classic 60's Black & White Design */
+.trading-attention-container {
+  position: relative;
+  padding: 60px 0;
+  min-height: 100vh;
+  background-color: #000;
+  color: #fff;
+  overflow: hidden;
+  z-index: 1;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+}
+
+/* Subtle background pattern inspired by 60's design */
+.trading-attention-container::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background: 
+    radial-gradient(circle at 20% 80%, rgba(255, 255, 255, 0.02) 0%, rgba(0, 0, 0, 0) 50%),
+    radial-gradient(circle at 80% 20%, rgba(255, 255, 255, 0.02) 0%, rgba(0, 0, 0, 0) 50%),
+    linear-gradient(180deg, rgba(0, 0, 0, 1) 0%, rgba(20, 20, 20, 1) 100%);
+  z-index: -1;
+  pointer-events: none;
+}
+
+
+
+/* Main content area */
+.trading-attention-content {
+  max-width: 1400px;
+  margin: 0 auto;
+  padding: 0 20px;
+}
+
+/* Stats display */
+.trading-attention-stats {
+  text-align: right;
+  margin-bottom: 20px;
+}
+
+.stats-text {
+  font-size: 14px;
+  color: rgba(255, 255, 255, 0.6);
+  font-weight: 400;
+}
+
+/* Filter Panel - Clean 60's aesthetic */
+.trading-attention-filters {
+  background-color: rgba(255, 255, 255, 0.02);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 2px;
+  padding: 30px;
+  margin-bottom: 40px;
+  box-shadow: 0 2px 20px rgba(0, 0, 0, 0.3);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+}
+
+/* Compact filter styling */
+.trading-attention-filters.compact {
+  padding: 15px 20px;
+  margin-bottom: 20px;
+}
+
+.trading-attention-filters .form-label {
+  color: rgba(255, 255, 255, 0.9);
+  font-size: 13px;
+  font-weight: 400;
+  margin-bottom: 10px;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.trading-attention-filters .form-group {
+  margin-bottom: 20px;
+  height: 100%;
+}
+
+/* Input styling - Classic clean look */
+.trading-attention-input {
+  width: 100%;
+  height: 48px !important;
+  background-color: rgba(255, 255, 255, 0.05) !important;
+  border: 1px solid rgba(255, 255, 255, 0.2) !important;
+  border-radius: 2px !important;
+  color: rgba(255, 255, 255, 0.9) !important;
+  font-size: 14px !important;
+  padding: 12px 16px !important;
+  transition: all 0.3s ease !important;
+  outline: none !important;
+  box-shadow: none !important;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+}
+
+/* Compact input styling */
+.trading-attention-input.compact {
+  height: 32px !important;
+  font-size: 12px !important;
+  padding: 6px 12px !important;
+}
+
+.trading-attention-input:focus {
+  border-color: rgba(255, 255, 255, 0.5) !important;
+  background-color: rgba(255, 255, 255, 0.08) !important;
+  box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.1) !important;
+}
+
+.trading-attention-input::placeholder {
+  color: rgba(255, 255, 255, 0.4) !important;
+  font-style: italic;
+}
+
+/* Button styling - Minimalist 60's approach */
+.trading-attention-button {
+  height: 48px !important;
+  background-color: rgba(255, 255, 255, 0.9) !important;
+  border: none !important;
+  border-radius: 2px !important;
+  color: #000 !important;
+  font-size: 14px !important;
+  font-weight: 400 !important;
+  padding: 0 24px !important;
+  transition: all 0.2s ease !important;
+  outline: none !important;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  min-width: 100px !important;
+  flex: 1 !important;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+}
+
+/* Compact button styling */
+.trading-attention-button.compact {
+  height: 32px !important;
+  font-size: 11px !important;
+  padding: 0 16px !important;
+  min-width: 60px !important;
+}
+
+.trading-attention-button:hover {
+  background-color: rgba(255, 255, 255, 1) !important;
+  transform: translateY(-1px) !important;
+  box-shadow: 0 4px 12px rgba(255, 255, 255, 0.2) !important;
+}
+
+.trading-attention-button:active {
+  transform: translateY(0) !important;
+  box-shadow: 0 2px 6px rgba(255, 255, 255, 0.1) !important;
+}
+
+.trading-attention-button:disabled {
+  opacity: 0.6 !important;
+  transform: none !important;
+  cursor: not-allowed !important;
+}
+
+.trading-attention-button-outline {
+  height: 48px !important;
+  background-color: transparent !important;
+  border: 1px solid rgba(255, 255, 255, 0.3) !important;
+  border-radius: 2px !important;
+  color: rgba(255, 255, 255, 0.9) !important;
+  font-size: 14px !important;
+  font-weight: 400 !important;
+  padding: 0 24px !important;
+  transition: all 0.2s ease !important;
+  outline: none !important;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  min-width: 100px !important;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+}
+
+/* Compact outline button styling */
+.trading-attention-button-outline.compact {
+  height: 32px !important;
+  font-size: 11px !important;
+  padding: 0 16px !important;
+  min-width: 60px !important;
+}
+
+.trading-attention-button-outline:hover {
+  border-color: rgba(255, 255, 255, 0.6) !important;
+  color: rgba(255, 255, 255, 1) !important;
+  background-color: rgba(255, 255, 255, 0.05) !important;
+  transform: translateY(-1px) !important;
+}
+
+.trading-attention-button-outline:active {
+  transform: translateY(0) !important;
+  background-color: rgba(255, 255, 255, 0.1) !important;
+}
+
+/* Loading state styling */
+.trading-attention-loading {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  min-height: 400px;
+  color: rgba(255, 255, 255, 0.7);
+}
+
+.trading-attention-loading .spinner-border {
+  width: 3rem;
+  height: 3rem;
+  margin-bottom: 1.5rem;
+  color: rgba(255, 255, 255, 0.7);
+  border-width: 3px;
+}
+
+.trading-attention-loading p {
+  font-size: 16px;
+  font-weight: 300;
+  margin: 0;
+}
+
+/* Error state styling */
+.trading-attention-error {
+  background-color: rgba(220, 53, 69, 0.1) !important;
+  border: 1px solid rgba(220, 53, 69, 0.3) !important;
+  border-radius: 2px !important;
+  color: #ff8e8e !important;
+  padding: 20px !important;
+  margin-bottom: 30px !important;
+  font-size: 14px;
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+}
+
+.trading-attention-error .fas {
+  margin-right: 8px;
+}
+
+/* Make columns equal height */
+.trading-attention-filters .row {
+  align-items: stretch;
+}
+
+.trading-attention-filters .col-md-3,
+.trading-attention-filters .col-md-4,
+.trading-attention-filters .col-md-5 {
+  display: flex;
+  flex-direction: column;
+}
+
+/* Responsive adjustments */
+@media (max-width: 992px) {
+  .trading-attention-title h1 {
+    font-size: 42px;
+  }
+  
+  .trading-attention-subtitle {
+    font-size: 16px;
+  }
+  
+  .trading-attention-filters {
+    padding: 25px;
+  }
+}
+
+@media (max-width: 768px) {
+  .trading-attention-container {
+    padding: 40px 0;
+  }
+  
+  .trading-attention-header {
+    margin-bottom: 60px;
+  }
+  
+  .trading-attention-title h1 {
+    font-size: 36px;
+  }
+  
+  .trading-attention-filters {
+    padding: 20px;
+  }
+  
+  .trading-attention-filters .form-group {
+    margin-bottom: 16px;
+  }
+  
+  .trading-attention-button, 
+  .trading-attention-button-outline {
+    width: 100%;
+    margin-bottom: 10px;
+  }
+  
+  .trading-attention-filters .col-md-5 .d-flex {
+    flex-direction: column;
+  }
+}
+
+@media (max-width: 480px) {
+  .trading-attention-title h1 {
+    font-size: 32px;
+  }
+  
+  .trading-attention-subtitle {
+    font-size: 15px;
+  }
+  
+  .trading-attention-filters {
+    padding: 15px;
+  }
+  
+  .stats-text {
+    text-align: center;
+  }
+} 
