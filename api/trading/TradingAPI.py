@@ -1,0 +1,328 @@
+from config.Config import get_config
+from flask import jsonify, Blueprint, request
+from database.operations.PortfolioDB import PortfolioDB
+from database.trading.TradingHandler import TradingHandler
+from actions.TradingActionEnhanced import TradingActionEnhanced
+from logs.logger import get_logger
+from actions.DexscrennerAction import DexScreenerAction
+from api.trading.TradingAPIUtil import TradingAPIUtil
+import time
+
+logger = get_logger(__name__)
+
+trading_bp = Blueprint('trading', __name__)
+
+# Initialize database connection
+db = PortfolioDB()
+trading_handler = TradingHandler(db.conn_manager)
+
+@trading_bp.route('/api/tokens/add', methods=['POST', 'OPTIONS'])
+def addToken():
+    """
+    Add Token API - POST /api/tokens/add
+    
+    REQUEST BODY (New tokens - no EMA required):
+    {
+        "tokenAddress": "So11111111111111111111111111111111111111112",
+        "pairAddress": "4w2cysotX6czaUGmmWg13hDpY4QEMG2CzeKYEQyK9Ama"
+    }
+    
+    REQUEST BODY (Old tokens - Per-timeframe EMA with user-friendly times):
+    {
+        "tokenAddress": "So11111111111111111111111111111111111111112",
+        "pairAddress": "4w2cysotX6czaUGmmWg13hDpY4QEMG2CzeKYEQyK9Ama",
+        "ema21": {
+            "15m": {"value": 1.25, "referenceTime": "10:30 AM"},
+            "1h": {"value": 1.28, "referenceTime": "10 AM"},
+            "4h": {"value": 1.30, "referenceTime": "8 AM"}
+        },
+        "ema34": {
+            "15m": {"value": 1.22, "referenceTime": "10:30 AM"},
+            "1h": {"value": 1.24, "referenceTime": "10 AM"},
+            "4h": {"value": 1.26, "referenceTime": "8 AM"}
+        }
+    }
+    """
+    if request.method == 'OPTIONS':
+        return jsonify({}), 200
+
+    try:
+        # Step 1: Validate request data structure
+        data = request.get_json()
+        isValid, errorMessage, requestData = TradingAPIUtil.validateRequestData(data)
+        if not isValid:
+            return jsonify({'success': False, 'error': errorMessage}), 400
+
+        tokenAddress = requestData['tokenAddress']
+        pairAddress = requestData['pairAddress']
+        addedBy = requestData['addedBy']
+
+        # Step 2: Check if token already exists in tracked tokens
+        existingTokens = trading_handler.getActiveTokens()
+        for existing in existingTokens:
+            if existing['tokenaddress'] == tokenAddress:
+                return jsonify({
+                    'success': False,
+                    'error': f'Token {tokenAddress} is already being tracked',
+                    'conflictType': 'ALREADY_ACTIVE'
+                }), 409
+
+        # Step 3: Get token information from DexScreener API to check pair age
+        dexAction = DexScreenerAction()
+        tokenInfoFromAPI = dexAction.getTokenPrice(tokenAddress)
+        
+        if not tokenInfoFromAPI:
+            return jsonify({
+                'success': False,
+                'error': 'Token not found on DexScreener or no valid trading pairs available'
+            }), 404
+
+        # Step 4: Calculate pair age to determine flow
+        currentTime = int(time.time())
+        pairCreatedTime = tokenInfoFromAPI.pairCreatedAt // 1000  # ms to seconds
+        pairAgeInDays = (currentTime - pairCreatedTime) / 86400
+
+        logger.info(f"Processing token {tokenInfoFromAPI.symbol} (age: {pairAgeInDays:.1f} days)")
+
+        # Step 5: Initialize TradingActionEnhanced for token processing
+        tradingAction = TradingActionEnhanced(db)
+
+        # Step 6: Route based on pair age
+        if pairAgeInDays <= 7:
+            # New token flow (≤7 days) - no EMA data required
+            tokenAddition = tradingAction.addNewToken(
+                tokenAddress=tokenAddress,
+                pairAddress=pairAddress,
+                symbol=tokenInfoFromAPI.symbol,
+                name=tokenInfoFromAPI.name,
+                pairCreatedTime=pairCreatedTime,
+                addedBy=addedBy
+            )
+        else:
+            # Old token flow (>7 days) - requires per-timeframe EMA data
+            processedEMAData = None
+            if requestData['ema21Data'] and requestData['ema34Data']:
+                # Validate and process per-timeframe EMA data
+                isValid, errorMessage, processedEMAData = TradingAPIUtil.validateOldTokenRequirements(
+                    pairAgeInDays,
+                    requestData['ema21Data'],
+                    requestData['ema34Data']
+                )
+                if not isValid:
+                    errorResponse, statusCode = TradingAPIUtil.formatOldTokenErrorResponse(pairAgeInDays, errorMessage)
+                    return jsonify(errorResponse), statusCode
+
+            if not processedEMAData:
+                errorResponse, statusCode = TradingAPIUtil.formatOldTokenErrorResponse(pairAgeInDays)
+                return jsonify(errorResponse), statusCode
+
+            # Convert to per-timeframe format and call old token handler
+            perTimeframeEMAData = TradingAPIUtil.convertToPerTimeframeFormat(processedEMAData)
+            tokenAddition = tradingAction.addOldToken(
+                tokenAddress=tokenAddress,
+                pairAddress=pairAddress,
+                symbol=tokenInfoFromAPI.symbol,
+                name=tokenInfoFromAPI.name,
+                pairCreatedTime=pairCreatedTime,
+                perTimeframeEMAData=perTimeframeEMAData,
+                addedBy=addedBy
+            )
+
+        # Step 7: Return appropriate response
+        if tokenAddition['success']:
+            successResponse = TradingAPIUtil.formatSuccessResponse(
+                tokenAddition, tokenAddress, pairAddress, pairAgeInDays, tokenInfoFromAPI
+            )
+            return jsonify(successResponse), 201
+        else:
+            errorResponse, statusCode = TradingAPIUtil.formatErrorResponse(
+                tokenAddition.get('error', 'Unknown error occurred')
+            )
+            return jsonify(errorResponse), statusCode
+
+    except Exception as e:
+        logger.error(f"Error in addToken API: {str(e)}", exc_info=True)
+        return jsonify({
+            'success': False,
+            'error': f'Internal server error: {str(e)}'
+        }), 500
+
+
+@trading_bp.route('/api/tokens/disable', methods=['POST', 'OPTIONS'])
+def disableToken():
+   """
+   Disable Token API - POST /api/tokens/disable
+  
+   REQUEST BODY:
+   {
+       "tokenAddress": "So11111111111111111111111111111111111111112",
+       "reason": "Low volume",
+       "disabledBy": "admin@example.com"
+   }
+   """
+   if request.method == 'OPTIONS':
+       return jsonify({}), 200
+  
+   try:
+       data = request.get_json()
+       if not data:
+           return jsonify({
+               'success': False,
+               'error': 'No JSON data provided'
+           }), 400
+      
+       # Extract and validate required fields
+       token_address = data.get('tokenAddress', '').strip()
+       reason = data.get('reason', '').strip()
+       disabled_by = data.get('disabledBy', 'api_user')
+      
+       # Validate required fields
+       if not token_address:
+           return jsonify({
+               'success': False,
+               'error': 'Missing required field: tokenAddress'
+           }), 400
+      
+      
+       # Check if token exists and is active
+       existing_tokens = trading_handler.getActiveTokens()
+       token_found = None
+       for existing in existing_tokens:
+           if existing['tokenaddress'] == token_address:
+               token_found = existing
+               break
+      
+       if not token_found:
+           return jsonify({
+               'success': False,
+               'error': f'Token {token_address} not found or already disabled'
+           }), 404
+      
+       # Disable the token
+       logger.info(f"Disabling token: {token_found['symbol']} ({token_address}) - Reason: {reason}")
+      
+       success = trading_handler.disableToken(
+           tokenAddress=token_address,
+           disabledBy=disabled_by,
+           reason=reason
+       )
+      
+       if not success:
+           return jsonify({
+               'success': False,
+               'error': 'Failed to disable token'
+           }), 500
+      
+       logger.info(f"Successfully disabled token {token_found['symbol']}")
+      
+       return jsonify({
+           'success': True,
+           'tokenAddress': token_address,
+           'symbol': token_found['symbol'],
+           'name': token_found['name'],
+           'reason': reason,
+           'disabledBy': disabled_by,
+           'message': f'Token {token_found["symbol"]} disabled successfully'
+       }), 200
+      
+   except Exception as e:
+       logger.error(f"Error in disableToken API: {str(e)}", exc_info=True)
+       return jsonify({
+           'success': False,
+           'error': f'Internal server error: {str(e)}'
+       }), 500
+
+
+@trading_bp.route('/api/tokens/list', methods=['GET', 'OPTIONS'])
+def listTokens():
+   """
+   List Tokens API - GET /api/tokens/list
+  
+   Query Parameters:
+   - status: "active", "disabled", "all" (default: "active")
+   - limit: Number of tokens to return (default: 100)
+   - offset: Offset for pagination (default: 0)
+   """
+   if request.method == 'OPTIONS':
+       return jsonify({}), 200
+  
+   try:
+       # Parse query parameters
+       status = request.args.get('status', 'active').lower()
+       limit = int(request.args.get('limit', 100))
+       offset = int(request.args.get('offset', 0))
+      
+       # Validate parameters
+       if status not in ['active', 'disabled', 'all']:
+           return jsonify({
+               'success': False,
+               'error': 'Invalid status. Must be "active", "disabled", or "all"'
+           }), 400
+      
+       if limit < 1 or limit > 1000:
+           return jsonify({
+               'success': False,
+               'error': 'Limit must be between 1 and 1000'
+           }), 400
+      
+       if offset < 0:
+           return jsonify({
+               'success': False,
+               'error': 'Offset must be non-negative'
+           }), 400
+      
+       # Get tokens based on status
+       if status == 'active':
+           tokens = trading_handler.getActiveTokens()
+       else:
+           # For now, we'll just return active tokens
+           # In a full implementation, you'd add methods to get disabled/all tokens
+           tokens = trading_handler.getActiveTokens()
+      
+       # Apply pagination
+       total_count = len(tokens)
+       paginated_tokens = tokens[offset:offset + limit]
+      
+       # Format response
+       formatted_tokens = []
+       for token in paginated_tokens:
+           formatted_token = {
+               'tokenId': token['trackedtokenid'],
+               'tokenAddress': token['tokenaddress'],
+               'symbol': token['symbol'],
+               'name': token['name'],
+               'pairAddress': token['pairaddress'],
+               'status': 'active' if token['status'] == 1 else 'disabled',
+               'enabledAt': token['enabledat'].isoformat() if token['enabledat'] else None,
+               'disabledAt': token['disabledat'].isoformat() if token['disabledat'] else None,
+               'createdAt': token['createdat'].isoformat() if token['createdat'] else None,
+               'lastUpdatedAt': token['lastupdatedat'].isoformat() if token['lastupdatedat'] else None,
+               'addedBy': token['addedby'],
+               'disabledBy': token['disabledby'],
+               'activeTimeframes': token.get('active_timeframes', 0),
+               'metadata': token['metadata']
+           }
+           formatted_tokens.append(formatted_token)
+      
+       return jsonify({
+           'success': True,
+           'tokens': formatted_tokens,
+           'pagination': {
+               'total': total_count,
+               'limit': limit,
+               'offset': offset,
+               'hasMore': offset + limit < total_count
+           }
+       }), 200
+      
+   except ValueError as e:
+       return jsonify({
+           'success': False,
+           'error': f'Invalid parameter: {str(e)}'
+       }), 400
+   except Exception as e:
+       logger.error(f"Error in listTokens API: {str(e)}", exc_info=True)
+       return jsonify({
+           'success': False,
+           'error': f'Internal server error: {str(e)}'
+       }), 500

@@ -16,6 +16,7 @@ from scheduler.WalletsInvestedScheduler import WalletsInvestedScheduler
 from scheduler.VolumebotScheduler import VolumeBotScheduler
 from scheduler.PumpfunScheduler import PumpFunScheduler
 from scheduler.OnchainScheduler import OnchainScheduler
+from scheduler.TradingScheduler import TradingScheduler
 from scheduler.TradingAttentionScheduler import TradingAttentionScheduler
 from scheduler.AttentionScheduler import AttentionScheduler
 from scheduler.DeactivateLostSMBalanceTokens import DeactiveLostSMBalanceTokens
@@ -77,6 +78,11 @@ def run_onchain_analysis_job():
     with_retries(OnchainScheduler.handleOnchainAnalysisFromJob, OnchainScheduler)
 
 
+def run_trading_updates_job():
+    """Run trading data updates with retry logic."""
+    with_retries(TradingScheduler.handleTradingUpdatesFromJob, TradingScheduler)
+
+
 def run_trading_attention_analysis_job():
     """Run trading attention analysis with retry logic."""
     with_retries(TradingAttentionScheduler.handleTradingAttentionAnalysisFromJob, TradingAttentionScheduler)
@@ -117,6 +123,7 @@ class JobRunner:
             ("volume_bot_analysis", {"minute": "*/2"}),
             ("pump_fun_analysis", {"minute": "*/2"}),
             ("onchain_analysis", {"minute": "*/10"}),
+            ("trading_updates", {"minute": "*/5"}),
             ("trading_attention_analysis", {"hour": "*/1"})
         ]
         for job_id, default_schedule in jobs:
@@ -129,6 +136,8 @@ class JobRunner:
                 job_func = run_pump_fun_analysis_job
             if job_id == "onchain_analysis":
                 job_func = run_onchain_analysis_job
+            if job_id == "trading_updates":
+                job_func = run_trading_updates_job
             if job_id == "trading_attention_analysis":
                 job_func = run_trading_attention_analysis_job
             
