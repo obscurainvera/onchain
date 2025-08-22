@@ -22,6 +22,7 @@ from database.auth.TokenHandler import TokenHandler
 from database.auth.CredentialsHandler import CredentialsHandler
 from framework.analyticshandlers.AnalyticsHandler import AnalyticsHandler
 from database.notification.NotificationHandler import NotificationHandler
+from database.trading.TradingHandler import TradingHandler
 from typing import Optional, Any, List, Tuple
 from logs.logger import get_logger
 from framework.analyticsframework.models.BaseModels import (
@@ -121,6 +122,7 @@ class PortfolioDB:
             "analytics": AnalyticsHandler(self.conn_manager),
             "notification": NotificationHandler(self.conn_manager),
             "smWalletBehaviour": SmartMoneyWalletBehaviourHandler(self.conn_manager),
+            "trading": TradingHandler(self.conn_manager),
         }
 
         # Set direct properties for commonly used handlers for ease of access
@@ -140,6 +142,7 @@ class PortfolioDB:
         self.analytics = self._handlers["analytics"]
         self.notification = self._handlers["notification"]
         self.smWalletBehaviour = self._handlers["smWalletBehaviour"]
+        self.trading = self._handlers["trading"]
 
         # Also create a handler map for getattr fallback lookup
         self._handler_method_map = {}
