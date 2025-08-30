@@ -65,6 +65,18 @@ class ServiceCredentials(Enum):
         }
     }
 
+    BIRDEYE = {
+        "service_name": "birdeye",
+        "credential_type": CredentialType.API_KEY,
+        "requires_credits": True,
+        "metadata": {
+            "base_url": "https://public-api.birdeye.so",
+            "credits_per_call": 40,
+            "rate_limit": 100,
+            "description": "BirdEye API for Solana token OHLCV data"
+        }
+    }
+
     def __init__(self, config: Dict):
         self.service_name = config["service_name"]
         self.credential_type = config["credential_type"]

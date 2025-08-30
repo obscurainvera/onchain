@@ -21,6 +21,10 @@ class TokenPrice:
     marketCap: float  # marketCap
     name: str    # token name
     symbol: str  # token symbol
+    pairAddress: str = ""  # pair address
+    pairCreatedAt: int = 0  # Unix timestamp in milliseconds from API
+    dexId: str = ""  # dex identifier
+    liquidityUsd: float = 0.0  # liquidity in USD
 
 class DexScreenerAction:
     """Handles DexScreener API request workflow"""
@@ -136,7 +140,11 @@ class DexScreenerAction:
                 fdv=float(highestLiquidityPair['fdv']),
                 marketCap=float(highestLiquidityPair['marketCap']),
                 name=baseToken.get('name', ''),
-                symbol=baseToken.get('symbol', '')
+                symbol=baseToken.get('symbol', ''),
+                pairAddress=highestLiquidityPair.get('pairAddress', ''),
+                pairCreatedAt=int(highestLiquidityPair.get('pairCreatedAt', 0)),
+                dexId=highestLiquidityPair.get('dexId', ''),
+                liquidityUsd=float(highestLiquidityPair.get('liquidity', {}).get('usd', 0))
             )
             
         except Exception as e:
@@ -219,7 +227,11 @@ class DexScreenerAction:
                         fdv=fdv,
                         marketCap=market_cap,
                         name=pairData.get('baseToken', {}).get('name', ''),
-                        symbol=pairData.get('baseToken', {}).get('symbol', '')
+                        symbol=pairData.get('baseToken', {}).get('symbol', ''),
+                        pairAddress=pairData.get('pairAddress', ''),
+                        pairCreatedAt=int(pairData.get('pairCreatedAt', 0)),
+                        dexId=pairData.get('dexId', ''),
+                        liquidityUsd=float(pairData.get('liquidity', {}).get('usd', 0))
                     )
                 
                 # Check for missing tokens in the response
