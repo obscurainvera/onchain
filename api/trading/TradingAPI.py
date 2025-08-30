@@ -4,12 +4,13 @@ from flask import jsonify, Blueprint, request
 from database.operations.PortfolioDB import PortfolioDB
 from database.trading.TradingHandler import TradingHandler
 from database.trading.TradingModels import TrackedToken, BackfillRequest
-from actions.TradingAction import TradingAction
+from actions.TradingActionEnhanced import TradingActionEnhanced
 from logs.logger import get_logger
 import re
 from datetime import datetime, timedelta
 import pytz
 import time
+from actions.DexscrennerAction import DexScreenerAction
 
 
 logger = get_logger(__name__)
@@ -72,7 +73,6 @@ def addToken():
            }), 400
       
        # Check token age first to determine if EMA values are required
-       from actions.DexscrennerAction import DexScreenerAction
        dex_action = DexScreenerAction()
        token_info = dex_action.getTokenPrice(token_address)
       
@@ -129,12 +129,12 @@ def addToken():
                    'conflictType': 'ALREADY_ACTIVE'
                }), 409
       
-       # Use TradingAction for manual token addition with enhanced flow
+       # Use TradingActionEnhanced for comprehensive token processing
        logger.info(f"Adding token: {token_address} (age: {pair_age_days:.1f} days)")
       
        try:
-           trading_action = TradingAction(db)
-           result = trading_action.addTokenManual(
+           trading_action = TradingActionEnhanced(db)
+           result = trading_action.processTokenAddition(
                tokenAddress=token_address,
                pairAddress=pair_address,
                ema21Values=ema21_values,

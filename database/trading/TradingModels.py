@@ -375,6 +375,35 @@ class BackfillResult:
     errordetails: Optional[str] = None
 
 # ===============================================================
+# SCHEDULER CONFIGURATION
+# ===============================================================
+
+@dataclass
+class SchedulerConfig:
+    """Production Configuration Constants for Trading Scheduler"""
+    
+    # API Configuration
+    API_DELAY_SECONDS: int = 2
+    API_RETRY_ATTEMPTS: int = 3
+    API_TIMEOUT_SECONDS: int = 30
+    
+    # Batch Processing Configuration
+    MAX_TOKENS_PER_BATCH: int = 100
+    MAX_CANDLES_MEMORY_LIMIT: int = 10000
+    
+    # Database Configuration
+    DB_QUERY_TIMEOUT: int = 60
+    DB_RETRY_ATTEMPTS: int = 2
+    
+    # Time Configuration
+    NEW_TOKEN_BUFFER_SECONDS: int = 300  # 5 minutes
+    HISTORICAL_DATA_DAYS: int = 2
+    
+    # Aggregation Configuration
+    AGGREGATION_TIMEFRAMES: List[str] = field(default_factory=lambda: ['1h', '4h'])
+    MIN_CANDLES_FOR_AGGREGATION: int = 1
+
+# ===============================================================
 # UTILITY FUNCTIONS FOR MODELS
 # ===============================================================
 

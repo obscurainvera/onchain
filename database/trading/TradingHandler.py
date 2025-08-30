@@ -17,74 +17,12 @@ class AdditionSource(IntEnum):
     MANUAL = 1
     AUTOMATIC = 2
 
-# Table Schema Documentation
-TRADING_SCHEMA_DOCS = {
-    "trackedtokens": {
-        "trackedtokenid": "Internal unique ID",
-        "tokenaddress": "Token contract address (44 chars)",
-        "symbol": "Trading symbol (e.g., 'SOL')", 
-        "name": "Full token name",
-        "pairaddress": "DEX pair address for price data",
-        "status": "1=active, 2=disabled",
-        "enabledat": "When token was added to tracking",
-        "disabledat": "When token was disabled",
-        "addedby": "User who added the token",
-        "disabledby": "User who disabled the token",
-        "metadata": "Additional token info (JSON)"
-    },
-    "timeframemetadata": {
-        "id": "Internal unique ID",
-        "tokenaddress": "Token contract address",
-        "pairaddress": "DEX pair address",
-        "timeframe": "15m, 1h, or 4h",
-        "nextfetchat": "When to fetch next data",
-        "lastfetchedat": "Last fetch attempt time",
-        "lastsuccessfullfetchat": "Last successful fetch",
-        "fetchintervalseconds": "Fetch interval (default 900s)",
-        "consecutivefailures": "Circuit breaker counter",
-        "isactive": "Whether fetching is enabled"
-    },
-    "ohlcvdetails": {
-        "id": "Internal unique ID",
-        "timeframeid": "Reference to timeframemetadata",
-        "tokenaddress": "Token contract address",
-        "pairaddress": "DEX pair address", 
-        "timeframe": "15m, 1h, or 4h",
-        "unixtime": "Candle timestamp (Unix)",
-        "timebucket": "Aggregation bucket timestamp",
-        "openprice": "Opening price",
-        "highprice": "Highest price in period",
-        "lowprice": "Lowest price in period",
-        "closeprice": "Closing price",
-        "volume": "Trading volume",
-        "vwapvalue": "VWAP at this candle (validation)",
-        "ema21value": "EMA21 at this candle (validation)",
-        "ema34value": "EMA34 at this candle (validation)",
-        "iscomplete": "Whether candle data is complete",
-        "datasource": "api=fetched, aggregated=derived"
-    },
-    "indicatorstates": {
-        "tokenaddress": "Token contract address",
-        "timeframe": "15m, 1h, or 4h", 
-        "indicatorkey": "Indicator identifier (e.g., ema_21)",
-        "currentvalue": "Current indicator value",
-        "previousvalue": "Previous value for cross detection",
-        "candlecount": "Number of candles processed",
-        "iswarmedup": "TRUE when enough data for accuracy"
-    },
-    "vwapsessions": {
-        "tokenaddress": "Token contract address",
-        "timeframe": "15m, 1h, or 4h",
-        "sessionstartunix": "Session start timestamp",
-        "sessionendunix": "Session end timestamp", 
-        "cumulativepv": "Cumulative price × volume",
-        "cumulativevolume": "Cumulative volume",
-        "currentvwap": "Current VWAP value",
-        "highvwap": "Highest VWAP in session",
-        "lowvwap": "Lowest VWAP in session",
-        "candlecount": "Candles in this session"
-    }
-}
+class EMAStatus(IntEnum):
+    """EMA calculation status enumeration"""
+    NOT_AVAILABLE = 1
+    AVAILABLE = 2
+
+# Actual Database Tables (based on _createBasicTables implementation)
 
 
 class TradingHandler(BaseDBHandler):
@@ -92,7 +30,6 @@ class TradingHandler(BaseDBHandler):
         if conn_manager is None:
             conn_manager = DatabaseConnectionManager()
         super().__init__(conn_manager)
-        self.schema = TRADING_SCHEMA_DOCS
         self._createTables()
 
     def _createTables(self):
@@ -158,9 +95,6 @@ class TradingHandler(BaseDBHandler):
                 timeframe CHAR(3) NOT NULL CHECK (timeframe IN ('15m', '1h', '4h')),
                 nextfetchat TIMESTAMP WITH TIME ZONE NOT NULL,
                 lastfetchedat TIMESTAMP WITH TIME ZONE,
-                lastsuccessfullfetchat TIMESTAMP WITH TIME ZONE,
-                fetchintervalseconds INTEGER DEFAULT 900,
-                consecutivefailures INTEGER DEFAULT 0,
                 isactive BOOLEAN DEFAULT TRUE,
                 createdat TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
                 lastupdatedat TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
@@ -197,18 +131,22 @@ class TradingHandler(BaseDBHandler):
             )
         """))
         
-        # 4. Indicator States
+        # 4. EMA States (replaces indicatorstates and indicatorconfigs)
         cursor.execute(text("""
-            CREATE TABLE IF NOT EXISTS indicatorstates (
+            CREATE TABLE IF NOT EXISTS emastates (
                 tokenaddress CHAR(44),
+                pairaddress CHAR(44),
                 timeframe CHAR(3),
-                indicatorkey VARCHAR(20),
-                currentvalue DECIMAL(20,8),
-                previousvalue DECIMAL(20,8),
-                candlecount INTEGER DEFAULT 0,
-                iswarmedup BOOLEAN DEFAULT FALSE,
+                emakey VARCHAR(20),
+                emavalue DECIMAL(20,8),
                 lastupdatedunix BIGINT,
-                PRIMARY KEY (tokenaddress, timeframe, indicatorkey)
+                nextfetchtime BIGINT,
+                emaavailabletime BIGINT,
+                paircreatedtime BIGINT,
+                status INTEGER DEFAULT 1 CHECK (status IN (1, 2)),
+                createdat TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+                lastupdatedat TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+                PRIMARY KEY (tokenaddress, timeframe, emakey)
             )
         """))
         
@@ -216,40 +154,166 @@ class TradingHandler(BaseDBHandler):
         cursor.execute(text("""
             CREATE TABLE IF NOT EXISTS vwapsessions (
                 tokenaddress CHAR(44),
+                pairaddress CHAR(44),
                 timeframe CHAR(3),
                 sessionstartunix BIGINT,
                 sessionendunix BIGINT,
                 cumulativepv DECIMAL(30,8),
                 cumulativevolume DECIMAL(30,8),
                 currentvwap DECIMAL(20,8),
-                highvwap DECIMAL(20,8),
-                lowvwap DECIMAL(20,8),
                 lastcandleunix BIGINT,
-                candlecount INTEGER DEFAULT 0,
+                nextcandlefetch BIGINT,
+                createdat TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+                lastupdatedat TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
                 PRIMARY KEY (tokenaddress, timeframe, sessionstartunix)
             )
         """))
         
-        # 6. Indicator Configurations
-        cursor.execute(text("""
-            CREATE TABLE IF NOT EXISTS indicatorconfigs (
-                configid SERIAL PRIMARY KEY,
-                tokenaddress CHAR(44),
-                timeframe CHAR(3),
-                indicatortype VARCHAR(20) NOT NULL,
-                parameters JSONB NOT NULL,
-                configname VARCHAR(50),
-                isactive BOOLEAN DEFAULT TRUE,
-                priority INTEGER DEFAULT 100,
-                createdat TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-                updatedat TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-                UNIQUE(tokenaddress, timeframe, indicatortype, configname)
-            )
-        """))
 
     def getTableDocumentation(self, tableName: str) -> dict:
         """Get documentation for a specific table"""
         return self.schema.get(tableName, {})
+
+    # ===============================================================
+    # ENHANCED METHODS FOR COMPREHENSIVE TOKEN PROCESSING
+    # ===============================================================
+    
+    def _createTimeframeRecord(self, tokenAddress: str, pairAddress: str, timeframe: str) -> bool:
+        """Create initial timeframe record with null timestamps"""
+        try:
+            with self.conn_manager.transaction() as cursor:
+                cursor.execute(text("""
+                    INSERT INTO timeframemetadata 
+                    (tokenaddress, pairaddress, timeframe, nextfetchat, lastfetchedat, isactive, createdat, lastupdatedat)
+                    VALUES (%s, %s, %s, NULL, NULL, %s, NOW(), NOW())
+                    ON CONFLICT (tokenaddress, pairaddress, timeframe) DO NOTHING
+                """), (tokenAddress, pairAddress, timeframe, True))
+                
+                return True
+                
+        except Exception as e:
+            logger.error(f"Error creating timeframe record: {e}")
+            return False
+
+    def _updateTimeframeFetchStatus(self, tokenAddress: str, timeframe: str, fetchTime: int) -> bool:
+        """Update timeframe fetch status"""
+        try:
+            with self.conn_manager.transaction() as cursor:
+                # Calculate next fetch time
+                if timeframe == '15m':
+                    next_fetch = fetchTime + 900
+                elif timeframe == '1h':
+                    next_fetch = fetchTime + 3600
+                elif timeframe == '4h':
+                    next_fetch = fetchTime + 14400
+                else:
+                    next_fetch = fetchTime + 900
+                
+                cursor.execute(text("""
+                    UPDATE timeframemetadata 
+                    SET lastfetchedat = %s, nextfetchat = %s, lastupdatedat = NOW()
+                    WHERE tokenaddress = %s AND timeframe = %s
+                """), (datetime.fromtimestamp(fetchTime), datetime.fromtimestamp(next_fetch), 
+                       tokenAddress, timeframe))
+                
+                return cursor.rowcount > 0
+                
+        except Exception as e:
+            logger.error(f"Error updating timeframe fetch status: {e}")
+            return False
+
+    def _createEMAState(self, tokenAddress: str, pairAddress: str, timeframe: str, emaKey: str,
+                       pairCreatedTime: int, emaAvailableTime: int, emaValue: Decimal = None,
+                       status: EMAStatus = EMAStatus.NOT_AVAILABLE, lastUpdatedUnix: int = None,
+                       nextFetchTime: int = None) -> bool:
+        """Create EMA state record"""
+        try:
+            with self.conn_manager.transaction() as cursor:
+                cursor.execute(text("""
+                    INSERT INTO emastates 
+                    (tokenaddress, pairaddress, timeframe, emakey, emavalue, 
+                     lastupdatedunix, nextfetchtime, emaavailabletime, paircreatedtime, status)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    ON CONFLICT (tokenaddress, timeframe, emakey) DO NOTHING
+                """), (tokenAddress, pairAddress, timeframe, emaKey, emaValue,
+                       lastUpdatedUnix, nextFetchTime, emaAvailableTime, pairCreatedTime, int(status)))
+                
+                return True
+                
+        except Exception as e:
+            logger.error(f"Error creating EMA state: {e}")
+            return False
+
+    def _updateEMAState(self, tokenAddress: str, timeframe: str, emaKey: str, emaValue: Decimal,
+                       status: EMAStatus, lastUpdatedUnix: int, nextFetchTime: int) -> bool:
+        """Update EMA state with calculated values"""
+        try:
+            with self.conn_manager.transaction() as cursor:
+                cursor.execute(text("""
+                    UPDATE emastates 
+                    SET emavalue = %s, status = %s, lastupdatedunix = %s, 
+                        nextfetchtime = %s, lastupdatedat = NOW()
+                    WHERE tokenaddress = %s AND timeframe = %s AND emakey = %s
+                """), (emaValue, int(status), lastUpdatedUnix, nextFetchTime, 
+                       tokenAddress, timeframe, emaKey))
+                
+                return cursor.rowcount > 0
+                
+        except Exception as e:
+            logger.error(f"Error updating EMA state: {e}")
+            return False
+
+    def _getTodaysCandles(self, tokenAddress: str, timeframe: str, dayStart: int) -> List[Dict]:
+        """Get all candles for today for a specific timeframe"""
+        try:
+            with self.conn_manager.transaction() as cursor:
+                cursor.execute(text("""
+                    SELECT * FROM ohlcvdetails
+                    WHERE tokenaddress = %s AND timeframe = %s 
+                      AND unixtime >= %s
+                    ORDER BY unixtime ASC
+                """), (tokenAddress, timeframe, dayStart))
+                
+                return [dict(row) for row in cursor.fetchall()]
+                
+        except Exception as e:
+            logger.error(f"Error getting today's candles: {e}")
+            return []
+
+    def _createVWAPSession(self, tokenAddress: str, pairAddress: str, timeframe: str, 
+                          sessionStart: int, currentVWAP: Decimal) -> bool:
+        """Create or update VWAP session"""
+        try:
+            with self.conn_manager.transaction() as cursor:
+                # Calculate next candle fetch time based on timeframe
+                if timeframe == '15m':
+                    next_candle = sessionStart + 900
+                elif timeframe == '1h':
+                    next_candle = sessionStart + 3600
+                elif timeframe == '4h':
+                    next_candle = sessionStart + 14400
+                else:
+                    next_candle = sessionStart + 900
+                
+                cursor.execute(text("""
+                    INSERT INTO vwapsessions 
+                    (tokenaddress, pairaddress, timeframe, sessionstartunix, sessionendunix,
+                     cumulativepv, cumulativevolume, currentvwap, lastcandleunix, nextcandlefetch)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    ON CONFLICT (tokenaddress, timeframe, sessionstartunix)
+                    DO UPDATE SET 
+                        currentvwap = EXCLUDED.currentvwap,
+                        lastcandleunix = EXCLUDED.lastcandleunix,
+                        nextcandlefetch = EXCLUDED.nextcandlefetch,
+                        lastupdatedat = NOW()
+                """), (tokenAddress, pairAddress, timeframe, sessionStart, sessionStart + 86400,
+                       Decimal('0'), Decimal('0'), currentVWAP, sessionStart, next_candle))
+                
+                return True
+                
+        except Exception as e:
+            logger.error(f"Error creating VWAP session: {e}")
+            return False
 
     def getColumnDescription(self, tableName: str, columnName: str) -> str:
         """Get description for a specific column"""
@@ -447,6 +511,34 @@ class TradingHandler(BaseDBHandler):
                 return [dict(row) for row in results]
         except Exception as e:
             logger.error(f"Error getting tokens due for fetch: {e}")
+            return []
+    
+    def getTokensDueForFetchWithBuffer(self, buffer_seconds: int = 300) -> List[Dict]:
+        """
+        Get tokens that need data fetching with creation time buffer (optimized version)
+        This method includes the 5-minute buffer directly in the SQL query
+        """
+        try:
+            with self.conn_manager.transaction() as cursor:
+                cursor.execute(
+                    text("""
+                        SELECT tm.*, tt.symbol, tt.name, tt.pairaddress as token_pair,
+                               EXTRACT(EPOCH FROM tt.createdat) as paircreatedtime
+                        FROM timeframemetadata tm
+                        JOIN trackedtokens tt ON tm.tokenaddress = tt.tokenaddress
+                        WHERE tm.timeframe = '15m'
+                          AND tm.nextfetchat <= NOW()
+                          AND tm.isactive = TRUE
+                          AND tt.status = 1
+                          AND (tt.createdat IS NULL OR tt.createdat <= NOW() - INTERVAL '%s seconds')
+                        ORDER BY tm.nextfetchat ASC
+                    """),
+                    (buffer_seconds)
+                )
+                results = cursor.fetchall()
+                return [dict(row) for row in results]
+        except Exception as e:
+            logger.error(f"Error getting tokens due for fetch with buffer: {e}")
             return []
 
     def updateFetchStatus(self, tokenAddress: str, timeframe: str, success: bool, nextFetchTime: datetime = None) -> bool:
@@ -1532,3 +1624,181 @@ class TradingHandler(BaseDBHandler):
             return 'bearish_cross'
         
         return 'no_cross'
+
+    # ===============================================================
+    # OPTIMIZED AGGREGATION METHODS
+    # ===============================================================
+    
+    def getCandlesForAggregation(self, token_addresses: List[str]) -> Dict[str, Dict]:
+        """
+        Get all 15m candles using MIN(last_1h_fetch, last_4h_fetch) for each token.
+        
+        FIXED LOGIC:
+        1. First get timeframe metadata for all tokens
+        2. Calculate MIN fetch time per token
+        3. Get 15m candles where unixtime > calculated MIN for each token
+        """
+        try:
+            with self.conn_manager.transaction() as cursor:
+                # Step 1: Get timeframe metadata for all requested tokens
+                cursor.execute(text("""
+                    WITH fetch_times AS (
+                        SELECT 
+                            t.tokenaddress,
+                            COALESCE(EXTRACT(EPOCH FROM tm1h.lastfetchedat), 0) as lastfetchedat_1h,
+                            COALESCE(EXTRACT(EPOCH FROM tm4h.lastfetchedat), 0) as lastfetchedat_4h,
+                            COALESCE(EXTRACT(EPOCH FROM tm1h.nextfetchat), 0) as nextfetchat_1h,
+                            COALESCE(EXTRACT(EPOCH FROM tm4h.nextfetchat), 0) as nextfetchat_4h,
+                            LEAST(
+                                COALESCE(EXTRACT(EPOCH FROM tm1h.nextfetchat), 0),
+                                COALESCE(EXTRACT(EPOCH FROM tm4h.nextfetchat), 0)
+                            ) as min_next_fetch_time
+                        FROM unnest(%s) AS t(tokenaddress)
+                        LEFT JOIN timeframemetadata tm1h ON t.tokenaddress = tm1h.tokenaddress 
+                            AND tm1h.timeframe = '1h'
+                        LEFT JOIN timeframemetadata tm4h ON t.tokenaddress = tm4h.tokenaddress 
+                            AND tm4h.timeframe = '4h'
+                    )
+                    SELECT 
+                        o.tokenaddress,
+                        o.pairaddress,
+                        o.unixtime,
+                        o.openprice,
+                        o.highprice,
+                        o.lowprice,
+                        o.closeprice,
+                        o.volume,
+                        ft.lastfetchedat_1h,
+                        ft.lastfetchedat_4h,
+                        ft.nextfetchat_1h,
+                        ft.nextfetchat_4h
+                    FROM ohlcvdetails o
+                    INNER JOIN fetch_times ft ON o.tokenaddress = ft.tokenaddress
+                    WHERE o.timeframe = '15m'
+                        AND o.iscomplete = TRUE
+                        AND o.unixtime >= ft.min_next_fetch_time
+                    ORDER BY o.tokenaddress, o.unixtime ASC
+                """), (token_addresses,))
+                
+                # Group 15m candles by token with fetch time metadata
+                results = {}
+                for row in cursor.fetchall():
+                    token_addr = row['tokenaddress']
+                    if token_addr not in results:
+                        results[token_addr] = {
+                            'candles_15m': [],
+                            'lastfetchedat_1h': row['lastfetchedat_1h'],
+                            'lastfetchedat_4h': row['lastfetchedat_4h'], 
+                            'nextfetchat_1h': row['nextfetchat_1h'],
+                            'nextfetchat_4h': row['nextfetchat_4h'],
+                            'pairaddress': row['pairaddress']
+                        }
+                    
+                    results[token_addr]['candles_15m'].append({
+                        'tokenaddress': row['tokenaddress'],
+                        'pairaddress': row['pairaddress'],
+                        'unixtime': row['unixtime'],
+                        'openprice': float(row['openprice']),
+                        'highprice': float(row['highprice']),
+                        'lowprice': float(row['lowprice']),
+                        'closeprice': float(row['closeprice']),
+                        'volume': float(row['volume'])
+                    })
+                
+                total_candles = sum(len(data['candles_15m']) for data in results.values())
+                logger.info(f"Retrieved {total_candles} 15m candles for aggregation across {len(results)} tokens")
+                return results
+                
+        except Exception as e:
+            logger.error(f"Error getting candles for aggregation: {e}")
+            return {}
+
+    def batchInsertAggregatedCandlesAndUpdateFetchTimes(self, aggregated_candles: List[Dict], timeframes: List[str]) -> int:
+        """
+        ATOMIC: Batch insert aggregated candles AND upsert fetch times in single transaction
+        """
+        try:
+            if not aggregated_candles:
+                return 0
+            
+            with self.conn_manager.transaction() as cursor:
+                # Batch insert all aggregated candles
+                insert_data = []
+                for candle in aggregated_candles:
+                    # Calculate timebucket
+                    unixtime = candle['unixtime']
+                    timeframe = candle['timeframe']
+                    if timeframe == '1h':
+                        timebucket = (unixtime // 3600) * 3600
+                    elif timeframe == '4h':
+                        timebucket = (unixtime // 14400) * 14400
+                    else:
+                        timebucket = unixtime
+                    
+                    insert_data.append((
+                        candle['tokenaddress'], candle['pairaddress'], timeframe,
+                        unixtime, timebucket, candle['openprice'], candle['highprice'],
+                        candle['lowprice'], candle['closeprice'], candle['volume']
+                    ))
+                
+                cursor.executemany(text("""
+                    INSERT INTO ohlcvdetails 
+                    (tokenaddress, pairaddress, timeframe, unixtime, timebucket, openprice, 
+                     highprice, lowprice, closeprice, volume, datasource, iscomplete, createdat, lastupdatedat)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 'aggregated', TRUE, NOW(), NOW())
+                    ON CONFLICT (tokenaddress, timeframe, unixtime) DO NOTHING
+                """), insert_data)
+                
+                # Group aggregated candles by token and timeframe to find latest persisted times
+                latest_aggregated_times = {}
+                for candle in aggregated_candles:
+                    key = (candle['tokenaddress'], candle['timeframe'])
+                    latest_aggregated_times[key] = max(
+                        latest_aggregated_times.get(key, 0), 
+                        candle['unixtime']
+                    )
+                
+                # UPSERT timeframe metadata - insert if not exists, update if exists
+                upsert_data = []
+                for (token_address, timeframe), latest_persisted_time in latest_aggregated_times.items():
+                    # Calculate next fetch time based on timeframe
+                    if timeframe == '1h':
+                        next_fetch_time = latest_persisted_time + 3600  # +1 hour
+                    elif timeframe == '4h':
+                        next_fetch_time = latest_persisted_time + 14400  # +4 hours
+                    else:
+                        continue  # Skip unknown timeframes
+                    
+                    # Need to get pairaddress for this token-timeframe combination
+                    pair_address = None
+                    for candle in aggregated_candles:
+                        if candle['tokenaddress'] == token_address and candle['timeframe'] == timeframe:
+                            pair_address = candle['pairaddress']
+                            break
+                    
+                    if pair_address:
+                        upsert_data.append((
+                            token_address, pair_address, timeframe,
+                            next_fetch_time, latest_persisted_time, next_fetch_time, latest_persisted_time
+                        ))
+                
+                # Batch upsert timeframe metadata
+                cursor.executemany(text("""
+                    INSERT INTO timeframemetadata 
+                    (tokenaddress, pairaddress, timeframe, nextfetchat, lastfetchedat, createdat, lastupdatedat)
+                    VALUES (%s, %s, %s, to_timestamp(%s), to_timestamp(%s), NOW(), NOW())
+                    ON CONFLICT (tokenaddress, pairaddress, timeframe)
+                    DO UPDATE SET 
+                        nextfetchat = to_timestamp(%s),
+                        lastfetchedat = to_timestamp(%s),
+                        lastupdatedat = NOW()
+                """), upsert_data)
+                
+                logger.debug(f"Upserted fetch times for {len(upsert_data)} token-timeframe combinations")
+                
+                return len(aggregated_candles)
+            
+        except Exception as e:
+            logger.error(f"Error batch inserting aggregated candles and updating fetch times: {e}")
+            return 0
+
