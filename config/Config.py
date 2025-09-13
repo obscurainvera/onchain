@@ -113,8 +113,7 @@ class Config:
     JOBS_DB_PATH = os.getenv("JOBS_DB_PATH", os.path.join(PROJECT_ROOT, "jobs.db"))
 
     JOB_SCHEDULES = {
-        "volume_bot_analysis": {"minute": "*/1"},
-        "pump_fun_analysis": {"minute": "*/1"}
+        "trading_updates": {"minute": "*/5"}
     }
 
     VOLUME_COOKIE = os.getenv("VOLUME_COOKIE", "default_volume_cookie")

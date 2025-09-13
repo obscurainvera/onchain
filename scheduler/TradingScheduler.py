@@ -1,29 +1,11 @@
-"""
-TradingScheduler - Main entry point for routine trading data updates
-
-This scheduler runs every 5 minutes to:
-1. Fetch latest 15-minute candle data from BirdEye API
-2. Perform smart aggregation to 1hr and 4hr timeframes
-3. Update VWAP indicators with session management
-4. Update EMA indicators with availability time checking
-5. Process all tokens sequentially for API rate limiting compliance
-
-Features:
-- UTC-based time calculations
-- API rate limiting with 2-second delays
-- Duplicate candle prevention
-- 5-minute buffer for new token additions
-- Comprehensive logging and error handling
-
-All utility functions have been moved to SchedulerUtil.py for better modularity.
-"""
 
 from config.Config import get_config
 from database.operations.PortfolioDB import PortfolioDB
 from database.trading.TradingHandler import TradingHandler
 from database.trading.TradingModels import SchedulerConfig
 from scheduler.SchedulerUtil import SchedulerUtil
-from scheduler.SchedulerConstants import FetchResultKeys
+from scheduler.SchedulerConstants import FetchResultKeys, CandleDataKeys
+from constants.TradingConstants import TimeframeConstants
 from logs.logger import get_logger
 from typing import List, Dict, Any
 import time
@@ -67,23 +49,23 @@ class TradingScheduler:
         3. Returns success status
         """
         try:
-            logger.info("Starting scheduled trading data updates")
+            logger.info("Starting scheduled trading data updates - NEW MULTI-TIMEFRAME FLOW")
             startTime = time.time()
             
-            # Get all tokens ready for 15m candle updates -- we only get 15m from the API
-            tokensToFetch15mCandles = self.getTokensToFetch15MinCandles()
+            # NEW FLOW: Get all timeframe records ready for fetching (30min, 1h, 4h)
+            timeframeRecords = self.getAllTimeframeRecordsForCandleFetchingFromAPI()
             
-            if not tokensToFetch15mCandles:
-                logger.info("No tokens ready for update")
+            if not timeframeRecords:
+                logger.info("No timeframe records ready for update")
                 return True
             
-            logger.info(f"Processing {len(tokensToFetch15mCandles)} tokens for updates")
+            logger.info(f"Processing {len(timeframeRecords)} timeframe records for updates")
             
-            # Process tokens using SchedulerUtil batch processing
-            successCount, errorCount = self.fetchCandlesAndUpdateIndicators(tokensToFetch15mCandles)
+            # Process using new Moralis-based flow with batch operations
+            successCount, errorCount = self.fetchAllCandlesAndUpdateIndicators(timeframeRecords)
             
             elapsedTime = time.time() - startTime
-            logger.info(f"Trading updates completed: {successCount} successful, {errorCount} errors in {elapsedTime:.2f}s")
+            logger.info(f"NEW FLOW: Trading updates completed: {successCount} successful, {errorCount} errors in {elapsedTime:.2f}s")
             
             return successCount > 0
             
@@ -91,88 +73,267 @@ class TradingScheduler:
             logger.error(f"Critical error in trading updates: {e}")
             return False
 
-    def getTokensToFetch15MinCandles(self) -> List[Dict[str, Any]]:
+    def getAllTimeframeRecordsForCandleFetchingFromAPI(self) -> List[Dict[str, Any]]:
         """
-        Get all tokens that need 15-minute candle updates using optimized TradingHandler method
+        NEW SCHEDULER FLOW: Get all timeframe records (not just 15m) ready for data fetching
         
-        Uses the new getTokensDueForFetchWithBuffer method that applies the 5-minute buffer
-        directly in the SQL query instead of filtering in Python - much more efficient!
+        This replaces the old 15m-only approach. Now we get ALL timeframes that need updates:
+        - 30min, 1h, 4h timeframes
+        - Uses 5-minute buffer for newly created tokens
+        - Returns timeframe-level records instead of token-level records
         
         Returns:
-            List of token records ready for update
+            List of timeframe records ready for update
         """
         try:
-            # Use optimized TradingHandler method with buffer built into the query
-            tokens = self.trading_handler.getTokensToFetch15MinCandlesWithBuffer(
+            # Get all timeframe records ready for fetching with buffer
+            timeframeRecordsReadyForFetching = self.trading_handler.getAllTimeframeRecordsReadyForFetching(
                 buffer_seconds=self.config.NEW_TOKEN_BUFFER_SECONDS
             )
             
-            logger.info(f"Found {len(tokens)} tokens ready for update (with buffer applied in query)")
-            return tokens
+            logger.info(f"Found {len(timeframeRecordsReadyForFetching)} timeframe records ready for update (with buffer applied)")
+            return timeframeRecordsReadyForFetching
                 
         except Exception as e:
-            logger.error(f"Error getting tokens ready for update: {e}")
+            logger.error(f"Error getting timeframe records ready for update: {e}")
             return []
 
-    def fetchCandlesAndUpdateIndicators(self, tokens: List[Dict[str, Any]]) -> tuple[int, int]:
+    def fetchAllCandlesAndUpdateIndicators(self, timeframeRecords: List[Dict[str, Any]]) -> tuple[int, int]:
         """
-        Process tokens sequentially using SchedulerUtil batch processing
+        NEW SCHEDULER FLOW: Process multi-timeframe records using Moralis API
         
-        Step-by-step process:
-        1. Input validation - Check if tokens list is empty
-        2. Batch API calls - Fetch 15-minute candle data from BirdEye API for all tokens with retry mechanism
-        3. Filter successful tokens - Identify tokens that had successful API responses
-        4. Batch aggregation - Aggregate candle data to 1hr and 4hr timeframes for successful tokens
-        5. Batch indicators update - Update VWAP and EMA indicators with memory management
-        6. Logging and metrics - Record processing statistics and performance metrics
+        Production-ready implementation with:
+        - Modular design with focused helper methods
+        - Comprehensive error handling and logging
+        - Batch operations for optimal performance
+        - Clear separation of concerns
         
         Args:
-            tokens: List of token records to process
+            timeframe_records: List of timeframe records ready for processing
             
         Returns:
             tuple: (success_count, error_count)
         """
-        # Input validation
-        if not tokens:
-            logger.info("No tokens provided for processing")
+        if not timeframeRecords:
+            logger.info("No timeframe records provided for processing")
             return 0, 0
 
         try:
-            logger.info(f"BATCH PROCESSING {len(tokens)} tokens")
+            logger.info(f"NEW FLOW: Starting batch processing of {len(timeframeRecords)} timeframe records")
             startTime = time.time()
             
-            # STEP 1: Batch API calls 
-            candle15mFetchedFromAPI = SchedulerUtil.batchFetch15mCandlesForAllTokens(tokens, self.config, self.trading_handler, self.trading_action)
-            successCount = candle15mFetchedFromAPI[FetchResultKeys.SUCCESSFUL_TOKENS]
-            failedCount = candle15mFetchedFromAPI[FetchResultKeys.FAILED_TOKENS]
-            successfulTokensList = candle15mFetchedFromAPI[FetchResultKeys.SUCCESSFUL_TOKENS_LIST]
+            # STEP 1: Batch fetch candle data from Moralis API
+            allCandlesFromAPI = self.batchFetchCandles(timeframeRecords)
             
-            logger.info(f"API phase completed: {successCount} successful, {failedCount} failed out of {len(tokens)} tokens")
+            # STEP 2: Batch persist all fetched data
+            persistedCandles = self.batchPersistCandles(allCandlesFromAPI['candleData'])
             
-            # STEP 2: Batch aggregation with validation
-            SchedulerUtil.batchAggregate15MInto1HrAnd4Hr(tokens, self.trading_handler)
-        
+            # STEP 3: Process indicators
+            calculatedIndicators = self.calculateAndUpdateIndicators()
             
-            # STEP 3: Batch VWAP processing with sophisticated session management
-            isVwapCompleted = SchedulerUtil.batchUpdateVWAP(successfulTokensList, self.trading_handler)
-            if not isVwapCompleted:
-                logger.warning("Batch VWAP processing encountered errors")
-            
-            # STEP 4: Batch EMA processing with sophisticated state management
-            isEMACompleted = SchedulerUtil.batchUpdateEMA(successfulTokensList, self.trading_handler)
-            if not isEMACompleted:
-                logger.warning("Batch EMA processing encountered errors")
-            
-            errorCount = len(tokens) - successCount
-            timeTaken = time.time() - startTime
-            
-            logger.info(f"BATCH PROCESSING completed in {timeTaken:.2f}s: {successCount} successful, {errorCount} errors")
-            
-            return successCount, errorCount
+            # STEP 4: Log final results
+            return self.log(allCandlesFromAPI, persistedCandles, calculatedIndicators, len(timeframeRecords), startTime)
             
         except Exception as e:
-            logger.error(f"Critical error in batch processing: {e}", exc_info=True)
-            return 0, len(tokens)
+            logger.error(f"Critical error in new scheduler flow: {e}", exc_info=True)
+            return 0, len(timeframeRecords)
+
+    def batchFetchCandles(self, timeframeRecords: List[Dict]) -> Dict:
+        """
+        Batch fetch candle data from Moralis API for all timeframe records
+        
+        Returns:
+            Dict containing candleData, successfulRecords, and totalCreditsUsed
+        """
+        allCandleData = {}
+        successfulRecords = []
+        totalCreditsUsed = 0
+        currentTime = int(time.time())
+        
+        logger.info("Phase 1: Batch fetching candle data from Moralis API")
+        
+        for i, record in enumerate(timeframeRecords, 1):
+            try:
+                # Calculate appropriate fromTime
+                fromTime = self.calculateFromTime(record)
+                
+                # Log progress for large batches
+                if i % 10 == 0 or i == len(timeframeRecords):
+                    logger.info(f"Processing record {i}/{len(timeframeRecords)}: {record['symbol']} {record['timeframe']}")
+                
+                # Fetch candle data
+                candlesFromAPI = self.fetchCandleFromAPI(record, fromTime, currentTime)
+                
+                if candlesFromAPI['success']:
+                    # Process successful fetch
+                    key = f"{record['tokenaddress']}_{record['timeframe']}"
+                    allCandleData[key] = self.formatCandlesFromAPIForBatchPersistence(candlesFromAPI)
+                    successfulRecords.append(record)
+                    totalCreditsUsed += candlesFromAPI.get('creditsUsed', 0)
+                    
+                    logger.debug(f"✓ Fetched {candlesFromAPI[CandleDataKeys.COUNT]} candles for {record['symbol']} {record['timeframe']}")
+                else:
+                    logger.warning(f"✗ Failed to fetch {record['timeframe']} data for {record['symbol']}: {candlesFromAPI.get('error', 'Unknown error')}")
+                    
+            except Exception as e:
+                logger.error(f"✗ Error processing record {record['tokenaddress']}_{record['timeframe']}: {e}")
+                continue
+        
+        logger.info(f"Phase 1 completed: {len(successfulRecords)}/{len(timeframeRecords)} successful fetches, {totalCreditsUsed} credits used")
+        
+        return {
+            'candleData': allCandleData,
+            'successfulRecords': successfulRecords,
+            'totalCreditsUsed': totalCreditsUsed
+        }
+
+    def calculateFromTime(self, record: Dict) -> int:
+        """
+        Calculate appropriate fromTime based on lastfetchedat status
+        
+        Business Logic: 
+        - If lastfetchedat IS NULL: fromTime = paircreatedtime - (timeframe_seconds * 2)
+        - If lastfetchedat IS NOT NULL: fromTime = lastfetchedat timestamp
+        """
+        if record['lastfetchedat'] is None:
+            # New record: use buffer approach like token addition flow
+            timeframeInSeconds = TimeframeConstants.getSeconds(record['timeframe'])
+            fromTime = record['paircreatedtime'] - (timeframeInSeconds * 2)
+            logger.debug(f"New record {record['tokenaddress']}_{record['timeframe']}: fromTime = paircreatedtime - buffer ({fromTime})")
+        else:
+            # Existing record: continue from last successful fetch
+            fromTime = record['lastfetchedat']  # lastfetchedat is already a Unix timestamp (int)
+            logger.debug(f"Existing record {record['tokenaddress']}_{record['timeframe']}: fromTime = lastfetchedat ({fromTime})")
+        
+        return fromTime
+
+    def fetchCandleFromAPI(self, record: Dict, fromTime: int, currentTime: int) -> Dict:
+        """
+        Fetch candle data for a single timeframe record using Moralis API
+        
+        Returns:
+            Dict with success status, candles, and metadata
+        """
+        try:
+            return self.trading_action.moralis_handler.getCandleDataForToken(
+                tokenAddress=record['tokenaddress'],
+                pairAddress=record['pairaddress'],
+                fromTime=fromTime,
+                toTime=currentTime,
+                timeframe=record['timeframe'],
+                symbol=record['symbol']
+            )
+        except Exception as e:
+            logger.error(f"Moralis API error for {record['symbol']} {record['timeframe']}: {e}")
+            return {'success': False, 'error': str(e)}
+
+    def formatCandlesFromAPIForBatchPersistence(self, candleResult: Dict) -> Dict:
+        """Format candle result for batch persistence"""
+        return {
+            CandleDataKeys.CANDLES: candleResult[CandleDataKeys.CANDLES],
+            CandleDataKeys.LATEST_TIME: candleResult[CandleDataKeys.LATEST_TIME],
+            CandleDataKeys.COUNT: candleResult[CandleDataKeys.COUNT]
+        }
+
+    def batchPersistCandles(self, allCandleData: Dict) -> Dict:
+        """
+        Batch persist all candle data in single database transaction
+        
+        Returns:
+            Dict with persistence results
+        """
+        logger.info("Phase 2: Batch persisting candle data")
+        
+        if not allCandleData:
+            logger.warning("No candle data to persist")
+            return {'candlesInserted': 0, 'success': False}
+        
+        try:
+            candlesInserted = self.trading_handler.batchPersistAllCandles(allCandleData)
+            logger.info(f"✓ Phase 2 completed: Batch persisted {candlesInserted} candles across {len(allCandleData)} timeframes")
+            
+            return {'candlesInserted': candlesInserted, 'success': True}
+            
+        except Exception as e:
+            logger.error(f"✗ Phase 2 failed: Error in batch persistence: {e}")
+            return {'candlesInserted': 0, 'success': False, 'error': str(e)}
+
+    def calculateAndUpdateIndicators(self) -> Dict:
+        """
+        Process VWAP and EMA indicators for tokens with successful data fetches
+        
+        Uses existing SchedulerUtil batch methods for optimal performance
+        
+        Returns:
+            Dict with indicator processing results
+        """
+        
+        logger.info("Phase 3: Processing indicators for successful tokens")
+        
+        try:
+            # Batch VWAP processing with new optimized flow (processes ALL active tokens)
+            vwapSuccess = SchedulerUtil.batchUpdateVWAPForScheduler(self.trading_handler)
+            if vwapSuccess:
+                logger.info("✓ VWAP batch processing completed successfully")
+            else:
+                logger.warning("✗ VWAP batch processing encountered errors")
+            
+            # NEW EMA processing with optimized scheduler flow (no token filtering needed)
+            emaSuccess = SchedulerUtil.batchUpdateEMAForScheduler(self.trading_handler)
+            if emaSuccess:
+                logger.info("✓ NEW EMA batch processing completed successfully")
+            else:
+                logger.warning("✗ NEW EMA batch processing encountered errors")
+            
+            logger.info(f"✓ Phase 3 completed: Processed VWAP and EMA for all active tokens")
+            
+            return {
+                'vwapSuccess': vwapSuccess,
+                'emaSuccess': emaSuccess,
+                'tokensProcessed': 'all_active_tokens'
+            }
+            
+        except Exception as e:
+            logger.error(f"✗ Phase 3 failed: Error in indicator processing: {e}")
+            return {'vwapSuccess': False, 'emaSuccess': False, 'tokensProcessed': 0, 'error': str(e)}
+
+   
+
+    def log(self, fetchResults: Dict, persistResults: Dict, 
+                            indicatorResults: Dict, totalRecords: int, startTime: float) -> tuple[int, int]:
+        """
+        Log comprehensive results and return success/error counts
+        
+        Returns:
+            tuple: (success_count, error_count)
+        """
+        timeTaken = time.time() - startTime
+        successCount = len(fetchResults['successfulRecords'])
+        errorCount = totalRecords - successCount
+        
+        # Comprehensive logging
+        logger.info("=" * 80)
+        logger.info("NEW SCHEDULER FLOW - FINAL RESULTS")
+        logger.info("=" * 80)
+        logger.info(f"- Processing Summary:")
+        logger.info(f"   • Total timeframe records processed: {totalRecords}")
+        logger.info(f"   • Successful API fetches: {successCount}")
+        logger.info(f"   • Failed API fetches: {errorCount}")
+        logger.info(f"   • Total credits used: {fetchResults['totalCreditsUsed']}")
+        logger.info(f"   • Processing time: {timeTaken:.2f}s")
+        logger.info(f"")
+        logger.info(f"- Data Persistence:")
+        logger.info(f"   • Candles inserted: {persistResults['candlesInserted']}")
+        logger.info(f"   • Persistence success: {persistResults['success']}")
+        logger.info(f"")
+        logger.info(f"- Indicator Processing:")
+        logger.info(f"   • Unique tokens processed: {indicatorResults['tokensProcessed']}")
+        logger.info(f"   • VWAP processing success: {indicatorResults['vwapSuccess']}")
+        logger.info(f"   • EMA processing success: {indicatorResults['emaSuccess']}")
+        logger.info("=" * 80)
+        
+        return successCount, errorCount
+
 
     def handleTradingDataFromAPI(self) -> Dict[str, Any]:
         """

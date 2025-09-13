@@ -9,7 +9,6 @@ from logs.logger import get_logger
 from database.operations.PortfolioDB import PortfolioDB
 from database.auth.ServiceCredentialsEnum import ServiceCredentials
 from scheduler.SchedulerConstants import CandleDataKeys
-from scheduler.SchedulerUtil import SchedulerUtil
 
 logger = get_logger(__name__)
 
@@ -312,7 +311,7 @@ class BirdEyeServiceHandler:
         
         try:
             response = self.session.get(
-                f"{self.baseUrl}/ohlcv",
+                f"{self.baseUrl}/defi/ohlcv/pair",
                 headers=headers,
                 params=params,
                 timeout=30
@@ -361,10 +360,8 @@ class BirdEyeServiceHandler:
                     CandleDataKeys.COUNT: 0
                 }
             
-            # Add symbol to each candle (tokenaddress and pairaddress already added in unified method)
+            # Processed candles are ready for use
             processedCandles = result['candles']
-            for candle in processedCandles:
-                candle['symbol'] = symbol
             
             return {
                 'success': True,

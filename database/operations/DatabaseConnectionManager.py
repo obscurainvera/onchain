@@ -90,6 +90,7 @@ class DatabaseConnectionManager:
                 "host": self.config.DB_HOST,
                 "port": self.config.DB_PORT,
                 "dbname": self.config.DB_NAME,
+                "options": "-c timezone=UTC"  # Set timezone to UTC for all connections
             }
 
             # Log connection attempt (without password)
@@ -345,6 +346,9 @@ class DatabaseConnectionManager:
                 else:
                     self._handle_connection_error(e, "transaction")
 
+            # Set timezone to UTC for this session
+            cur.execute("SET timezone = 'UTC'")
+            
             # Yield the cursor for the transaction
             yield cur
             if not cur.closed and not conn.closed:

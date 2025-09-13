@@ -1,0 +1,731 @@
+/* Token Add Page Styles - Classic 60's Black & White Design */
+.token-add-container {
+  position: relative;
+  padding: 60px 0;
+  min-height: 100vh;
+  background-color: #000;
+  color: #fff;
+  overflow: hidden;
+  z-index: 1;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+}
+
+/* Subtle background pattern inspired by 60's design */
+.token-add-container::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background: 
+    radial-gradient(circle at 20% 80%, rgba(255, 255, 255, 0.02) 0%, rgba(0, 0, 0, 0) 50%),
+    radial-gradient(circle at 80% 20%, rgba(255, 255, 255, 0.02) 0%, rgba(0, 0, 0, 0) 50%),
+    linear-gradient(180deg, rgba(0, 0, 0, 1) 0%, rgba(20, 20, 20, 1) 100%);
+  z-index: -1;
+  pointer-events: none;
+}
+
+/* Header Section */
+.token-add-header {
+  text-align: center;
+  margin-bottom: 60px;
+}
+
+.token-add-title h1 {
+  font-size: 56px;
+  font-weight: 300;
+  margin: 0 0 20px 0;
+  letter-spacing: -0.02em;
+  background: linear-gradient(135deg, #ffffff 0%, rgba(255, 255, 255, 0.7) 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+  line-height: 1.1;
+}
+
+.token-add-subtitle {
+  font-size: 18px;
+  color: rgba(255, 255, 255, 0.6);
+  font-weight: 300;
+  margin: 0;
+  letter-spacing: 0.02em;
+}
+
+/* Form Styles */
+.token-add-form {
+  max-width: 1400px;
+  margin: 0 auto;
+  padding: 0 20px;
+}
+
+.form-section {
+  background-color: rgba(255, 255, 255, 0.02);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 2px;
+  padding: 40px;
+  margin-bottom: 30px;
+  box-shadow: 0 2px 20px rgba(0, 0, 0, 0.3);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+}
+
+.form-section h2 {
+  color: rgba(255, 255, 255, 0.9);
+  font-size: 24px;
+  font-weight: 300;
+  margin-bottom: 30px;
+  letter-spacing: -0.01em;
+  text-transform: none;
+}
+
+.form-section h3 {
+  color: rgba(255, 255, 255, 0.8);
+  font-size: 18px;
+  font-weight: 400;
+  margin-bottom: 20px;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+}
+
+/* Input Styling - Classic clean look */
+.token-add-input {
+  width: 100%;
+  height: 56px !important;
+  background-color: rgba(255, 255, 255, 0.05) !important;
+  border: 1px solid rgba(255, 255, 255, 0.2) !important;
+  border-radius: 2px !important;
+  color: rgba(255, 255, 255, 0.9) !important;
+  font-size: 16px !important;
+  padding: 16px 20px !important;
+  transition: all 0.3s ease !important;
+  outline: none !important;
+  box-shadow: none !important;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+}
+
+.token-add-input:focus {
+  border-color: rgba(255, 255, 255, 0.5) !important;
+  background-color: rgba(255, 255, 255, 0.08) !important;
+  box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.1) !important;
+}
+
+.token-add-input::placeholder {
+  color: rgba(255, 255, 255, 0.4) !important;
+  font-style: italic;
+}
+
+/* Form Labels */
+.form-label {
+  color: rgba(255, 255, 255, 0.9) !important;
+  font-size: 14px !important;
+  font-weight: 400 !important;
+  margin-bottom: 12px !important;
+  letter-spacing: 0.05em !important;
+  text-transform: uppercase !important;
+}
+
+/* Token Info Card */
+.token-info-card {
+  background-color: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  border-radius: 2px;
+  padding: 30px;
+  margin-top: 30px;
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+}
+
+.token-info-card h3 {
+  color: rgba(255, 255, 255, 0.9);
+  font-size: 16px;
+  font-weight: 400;
+  margin-bottom: 20px;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.token-details {
+  display: flex;
+  flex-direction: column;
+  gap: 15px;
+}
+
+.detail-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 12px 0;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.detail-item:last-child {
+  border-bottom: none;
+}
+
+.detail-item .label {
+  color: rgba(255, 255, 255, 0.6);
+  font-size: 14px;
+  font-weight: 400;
+  letter-spacing: 0.02em;
+}
+
+.detail-item .value {
+  color: rgba(255, 255, 255, 0.95);
+  font-size: 16px;
+  font-weight: 500;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+/* Badge Styling */
+.old-token-badge {
+  background-color: rgba(255, 193, 7, 0.9) !important;
+  color: #000 !important;
+  font-size: 11px !important;
+  font-weight: 500 !important;
+  padding: 4px 8px !important;
+  border-radius: 2px !important;
+  letter-spacing: 0.02em !important;
+  text-transform: uppercase !important;
+}
+
+.old-token-indicator {
+  background-color: rgba(13, 202, 240, 0.9) !important;
+  color: #000 !important;
+  font-size: 12px !important;
+  font-weight: 500 !important;
+  padding: 6px 12px !important;
+  border-radius: 2px !important;
+  letter-spacing: 0.02em !important;
+  text-transform: uppercase !important;
+}
+
+/* EMA Section Styling */
+.ema-section {
+  background-color: rgba(255, 255, 255, 0.03) !important;
+  border-color: rgba(255, 255, 255, 0.15) !important;
+}
+
+.ema-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 20px;
+  flex-wrap: wrap;
+  gap: 15px;
+}
+
+.ema-description {
+  color: rgba(255, 255, 255, 0.7);
+  font-size: 14px;
+  margin-bottom: 30px;
+  line-height: 1.5;
+  font-style: italic;
+}
+
+.ema-group {
+  background-color: rgba(255, 255, 255, 0.02);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 2px;
+  padding: 25px;
+  margin-bottom: 25px;
+}
+
+.ema-group h3 {
+  color: rgba(255, 255, 255, 0.9);
+  font-size: 20px;
+  font-weight: 400;
+  margin-bottom: 20px;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+  padding-bottom: 10px;
+}
+
+/* EMA Row Styling - New timeframe-based layout */
+.ema-row {
+  background-color: rgba(255, 255, 255, 0.01);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 2px;
+  padding: 20px;
+  margin-bottom: 15px;
+}
+
+.ema-row:last-child {
+  margin-bottom: 0;
+}
+
+.ema-type-label {
+  color: rgba(255, 255, 255, 0.9);
+  font-size: 16px;
+  font-weight: 500;
+  margin-bottom: 15px;
+  letter-spacing: 0.02em;
+  padding: 8px 12px;
+  background-color: rgba(255, 255, 255, 0.03);
+  border-radius: 2px;
+  display: inline-block;
+  border-left: 3px solid rgba(255, 255, 255, 0.2);
+}
+
+/* Legacy timeframe styling - keeping for backward compatibility */
+.ema-timeframe {
+  background-color: rgba(255, 255, 255, 0.01);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 2px;
+  padding: 20px;
+  margin-bottom: 15px;
+}
+
+.ema-timeframe:last-child {
+  margin-bottom: 0;
+}
+
+.timeframe-label {
+  color: rgba(255, 255, 255, 0.8);
+  font-size: 14px;
+  font-weight: 500;
+  margin-bottom: 15px;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  padding: 8px 12px;
+  background-color: rgba(255, 255, 255, 0.05);
+  border-radius: 2px;
+  display: inline-block;
+}
+
+.ema-input {
+  height: 48px !important;
+  font-size: 14px !important;
+  padding: 12px 16px !important;
+}
+
+/* Chart Section */
+.chart-section {
+  background-color: rgba(255, 255, 255, 0.02);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 2px;
+  padding: 30px;
+  margin-bottom: 30px;
+  box-shadow: 0 2px 20px rgba(0, 0, 0, 0.3);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+}
+
+.dexscreener-chart-container {
+  background-color: rgba(255, 255, 255, 0.02);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 2px;
+  overflow: hidden;
+  margin-top: 20px;
+}
+
+.dexscreener-chart {
+  width: 100%;
+  height: 600px;
+  border: none;
+  display: block;
+}
+
+/* Submit Section */
+.submit-section {
+  background-color: rgba(255, 255, 255, 0.02);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 2px;
+  padding: 40px;
+  text-align: center;
+  box-shadow: 0 2px 20px rgba(0, 0, 0, 0.3);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+}
+
+/* Submit Button Styling - Minimalist 60's approach */
+.token-add-submit-btn {
+  height: 60px !important;
+  background-color: rgba(255, 255, 255, 0.9) !important;
+  border: none !important;
+  border-radius: 2px !important;
+  color: #000 !important;
+  font-size: 16px !important;
+  font-weight: 500 !important;
+  padding: 0 40px !important;
+  transition: all 0.3s ease !important;
+  outline: none !important;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  min-width: 280px !important;
+  margin: 0 auto !important;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  box-shadow: 0 4px 15px rgba(255, 255, 255, 0.1) !important;
+}
+
+.token-add-submit-btn:hover:not(:disabled) {
+  background-color: rgba(255, 255, 255, 1) !important;
+  transform: translateY(-2px) !important;
+  box-shadow: 0 8px 25px rgba(255, 255, 255, 0.2) !important;
+}
+
+.token-add-submit-btn:active:not(:disabled) {
+  transform: translateY(0) !important;
+  box-shadow: 0 4px 15px rgba(255, 255, 255, 0.1) !important;
+}
+
+.token-add-submit-btn:disabled {
+  opacity: 0.6 !important;
+  transform: none !important;
+  cursor: not-allowed !important;
+  background-color: rgba(255, 255, 255, 0.5) !important;
+}
+
+/* Error and Success Alerts */
+.token-add-error {
+  background-color: rgba(220, 53, 69, 0.1) !important;
+  border: 1px solid rgba(220, 53, 69, 0.3) !important;
+  border-radius: 2px !important;
+  color: #ff8e8e !important;
+  padding: 20px !important;
+  margin-bottom: 30px !important;
+  font-size: 14px;
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+}
+
+.token-add-success {
+  background-color: rgba(25, 135, 84, 0.1) !important;
+  border: 1px solid rgba(25, 135, 84, 0.3) !important;
+  border-radius: 2px !important;
+  color: #8eff8e !important;
+  padding: 20px !important;
+  margin-bottom: 30px !important;
+  font-size: 14px;
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+}
+
+.token-add-error .fas,
+.token-add-success .fas {
+  margin-right: 8px;
+}
+
+/* Loading Spinner Styling */
+.spinner-border {
+  color: rgba(0, 0, 0, 0.8) !important;
+}
+
+/* Responsive Design */
+@media (max-width: 1200px) {
+  .token-add-title h1 {
+    font-size: 48px;
+  }
+  
+  .form-section {
+    padding: 30px;
+  }
+  
+  .ema-group {
+    padding: 20px;
+  }
+  
+  .ema-timeframe {
+    padding: 15px;
+  }
+}
+
+@media (max-width: 992px) {
+  .token-add-container {
+    padding: 40px 0;
+  }
+  
+  .token-add-header {
+    margin-bottom: 40px;
+  }
+  
+  .token-add-title h1 {
+    font-size: 42px;
+  }
+  
+  .token-add-subtitle {
+    font-size: 16px;
+  }
+  
+  .form-section {
+    padding: 25px;
+  }
+  
+  .chart-section {
+    padding: 20px;
+  }
+  
+  .submit-section {
+    padding: 30px;
+  }
+}
+
+@media (max-width: 768px) {
+  .token-add-container {
+    padding: 30px 0;
+  }
+  
+  .token-add-title h1 {
+    font-size: 36px;
+  }
+  
+  .form-section {
+    padding: 20px;
+    margin-bottom: 20px;
+  }
+  
+  .token-add-input {
+    height: 48px !important;
+    font-size: 14px !important;
+    padding: 12px 16px !important;
+  }
+  
+  .ema-header {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  
+  .ema-group {
+    padding: 15px;
+  }
+  
+  .ema-timeframe {
+    padding: 12px;
+  }
+  
+  .token-add-submit-btn {
+    height: 52px !important;
+    font-size: 14px !important;
+    min-width: 240px !important;
+    padding: 0 30px !important;
+  }
+  
+  .dexscreener-chart {
+    height: 500px;
+  }
+}
+
+@media (max-width: 576px) {
+  .token-add-form {
+    padding: 0 15px;
+  }
+  
+  .token-add-title h1 {
+    font-size: 32px;
+  }
+  
+  .token-add-subtitle {
+    font-size: 15px;
+  }
+  
+  .form-section {
+    padding: 15px;
+  }
+  
+  .chart-section {
+    padding: 15px;
+  }
+  
+  .submit-section {
+    padding: 20px;
+  }
+  
+  .token-info-card {
+    padding: 20px;
+  }
+  
+  .detail-item {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 8px;
+  }
+  
+  .detail-item .value {
+    align-self: flex-end;
+  }
+  
+  .dexscreener-chart {
+    height: 400px;
+  }
+  
+  .token-add-submit-btn {
+    width: 100% !important;
+    min-width: auto !important;
+  }
+}
+
+/* Timeframes Selection Styling */
+.timeframes-selection {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(80px, 1fr));
+  gap: 15px;
+  padding: 20px;
+  background-color: rgba(255, 255, 255, 0.02);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 2px;
+  margin-bottom: 10px;
+}
+
+.timeframe-checkbox {
+  margin-bottom: 0 !important;
+}
+
+.timeframe-checkbox .form-check-input {
+  background-color: rgba(255, 255, 255, 0.05) !important;
+  border: 1px solid rgba(255, 255, 255, 0.2) !important;
+  border-radius: 2px !important;
+  width: 18px !important;
+  height: 18px !important;
+  margin-right: 8px !important;
+}
+
+.timeframe-checkbox .form-check-input:checked {
+  background-color: rgba(255, 255, 255, 0.9) !important;
+  border-color: rgba(255, 255, 255, 0.9) !important;
+}
+
+.timeframe-checkbox .form-check-input:focus {
+  border-color: rgba(255, 255, 255, 0.5) !important;
+  box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.1) !important;
+}
+
+.timeframe-checkbox .form-check-label {
+  color: rgba(255, 255, 255, 0.8) !important;
+  font-size: 13px !important;
+  font-weight: 500 !important;
+  cursor: pointer !important;
+  letter-spacing: 0.02em !important;
+  transition: color 0.2s ease !important;
+}
+
+.timeframe-checkbox .form-check-input:checked + .form-check-label {
+  color: rgba(255, 255, 255, 0.95) !important;
+}
+
+/* Manual EMA Toggle Styling */
+.manual-ema-toggle {
+  margin-bottom: 1.5rem !important;
+}
+
+.manual-ema-toggle .form-check-input {
+  background-color: rgba(255, 255, 255, 0.05) !important;
+  border: 1px solid rgba(255, 255, 255, 0.2) !important;
+  border-radius: 2px !important;
+  width: 20px !important;
+  height: 20px !important;
+}
+
+.manual-ema-toggle .form-check-input:checked {
+  background-color: rgba(255, 255, 255, 0.9) !important;
+  border-color: rgba(255, 255, 255, 0.9) !important;
+}
+
+.manual-ema-toggle .form-check-input:focus {
+  border-color: rgba(255, 255, 255, 0.5) !important;
+  box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.1) !important;
+}
+
+.manual-ema-toggle .form-check-label {
+  color: rgba(255, 255, 255, 0.8) !important;
+  font-size: 14px !important;
+  margin-left: 8px !important;
+  cursor: pointer;
+}
+
+/* Form Group Spacing */
+.mb-4 {
+  margin-bottom: 2rem !important;
+}
+
+/* Row and Column Adjustments */
+.form-section .row {
+  margin-left: -10px;
+  margin-right: -10px;
+}
+
+.form-section .row > * {
+  padding-left: 10px;
+  padding-right: 10px;
+}
+
+/* Select Dropdown Styling */
+.form-select {
+  background-color: rgba(255, 255, 255, 0.05) !important;
+  border: 1px solid rgba(255, 255, 255, 0.2) !important;
+  border-radius: 2px !important;
+  color: rgba(255, 255, 255, 0.9) !important;
+  font-size: 14px !important;
+  padding: 12px 16px !important;
+  height: 48px !important;
+  background-image: url("data:image/svg+xml,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3e%3cpath fill='none' stroke='rgba%28255,255,255,0.6%29' stroke-linecap='round' stroke-linejoin='round' stroke-width='2' d='m1 6 7 7 7-7'/%3e%3c/svg%3e") !important;
+}
+
+.form-select:focus {
+  border-color: rgba(255, 255, 255, 0.5) !important;
+  background-color: rgba(255, 255, 255, 0.08) !important;
+  box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.1) !important;
+}
+
+.form-select option {
+  background-color: #000 !important;
+  color: rgba(255, 255, 255, 0.9) !important;
+}
+
+/* Animation for form reveal */
+@keyframes fadeInUp {
+  from {
+    opacity: 0;
+    transform: translateY(30px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.ema-section {
+  animation: fadeInUp 0.6s ease-out;
+}
+
+.token-info-card {
+  animation: fadeInUp 0.4s ease-out;
+}
+
+.chart-section {
+  animation: fadeInUp 0.5s ease-out;
+}
+
+/* Responsive styling for timeframes */
+@media (max-width: 768px) {
+  .timeframes-selection {
+    grid-template-columns: repeat(auto-fit, minmax(70px, 1fr));
+    gap: 12px;
+    padding: 15px;
+  }
+  
+  .timeframe-checkbox .form-check-label {
+    font-size: 12px !important;
+  }
+}
+
+@media (max-width: 576px) {
+  .timeframes-selection {
+    grid-template-columns: repeat(2, 1fr);
+    gap: 10px;
+    padding: 12px;
+  }
+  
+  .timeframe-checkbox .form-check-input {
+    width: 16px !important;
+    height: 16px !important;
+  }
+  
+  .timeframe-checkbox .form-check-label {
+    font-size: 11px !important;
+  }
+}

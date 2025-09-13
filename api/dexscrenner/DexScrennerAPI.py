@@ -119,7 +119,11 @@ def getSingleTokenPrice(tokenAddress):
                     "fdv": result.fdv,
                     "marketCap": result.marketCap,
                     "name": result.name,
-                    "symbol": result.symbol
+                    "symbol": result.symbol,
+                    "pairCreatedAt": result.pairCreatedAt,
+                    "pairAddress": result.pairAddress,
+                    "dexId": result.dexId,
+                    "liquidityUsd": result.liquidityUsd
                 },
                 "executionTime": f"{executionTime:.2f}s"
             })

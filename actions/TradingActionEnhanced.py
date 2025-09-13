@@ -1,25 +1,16 @@
-from config.Config import get_config
-from typing import Optional, Dict, Any, List, Union
+
+from typing import Dict, Any, List
 from database.operations.PortfolioDB import PortfolioDB
-from database.trading.TradingHandler import TradingHandler, AdditionSource, EMAStatus
-from database.trading.TradingModels import (
-    TrackedToken, OHLCVCandle, BirdEyeOHLCVItem, BirdEyeOHLCVResponse,
-    BackfillRequest, BackfillResult, EMACalculationInput, VWAPCalculationInput
-)
-from decimal import Decimal
+from database.trading.TradingHandler import TradingHandler, AdditionSource
 import time
-from datetime import datetime, timedelta
 from logs.logger import get_logger
-from actions.DexscrennerAction import DexScreenerAction
-from actions.TradingActionUtil import TradingActionUtil
 from services.BirdEyeServiceHandler import BirdEyeServiceHandler
+from services.MoralisServiceHandler import MoralisServiceHandler
+from constants.TradingConstants import TimeframeConstants, TokenFlowConstants, ValidationMessages
 from scheduler.VWAPProcessor import VWAPProcessor
 from scheduler.EMAProcessor import EMAProcessor
-import pytz
-import uuid
-import json
-from sqlalchemy import text
 from scheduler.SchedulerConstants import CandleDataKeys
+
 
 logger = get_logger(__name__)
 
@@ -31,264 +22,321 @@ class TradingActionEnhanced:
         self.db = db
         self.trading_handler = TradingHandler(db.conn_manager)
         
-        # Use unified BirdEye service handler
+        # Use unified service handlers
         self.birdeye_handler = BirdEyeServiceHandler(db)
+        self.moralis_handler = MoralisServiceHandler(db)
         
         # Initialize processor instances
         self.vwap_processor = VWAPProcessor(self.trading_handler)
         self.ema_processor = EMAProcessor(self.trading_handler)
+ 
 
-       
-    def addNewToken(self, tokenAddress: str, pairAddress: str, symbol: str, name: str, pairCreatedTime: int, addedBy: str) -> Dict[str, Any]:
-        """Phase 1: Add new token with comprehensive processing"""
+    def addNewTokenWithTimeframes(self, tokenAddress: str, pairAddress: str, symbol: str, name: str, 
+                                 pairCreatedTime: int, timeframes: List[str], addedBy: str) -> Dict[str, Any]:
+        """
+        NEW FLOW: Add new token with specified timeframes using Moralis API
+        
+        This method implements the complete new token onboarding flow:
+        1. Database setup (token + timeframe scheduling)
+        2. Historical data fetching with proper edge case handling
+        3. Batch data persistence for optimal performance
+        """
         try:
-            currentTime = int(time.time())
+            logger.info(f"Adding new token {symbol} with timeframes: {timeframes}")
             
-            # Step 1: Add token to trackedtokens table
-            tokenId = self.trading_handler.addToken(
-                tokenAddress=tokenAddress,
-                symbol=symbol,
-                name=name,
-                pairAddress=pairAddress,
-                pairCreatedTime=pairCreatedTime,
-                additionSource=AdditionSource.MANUAL if addedBy != "automatic_system" else AdditionSource.AUTOMATIC,
-                addedBy=addedBy
+            # Step 1: add token to trackedtokens table
+            tokenId = self.addTokenToTrackedTokensDatabase(
+                tokenAddress, pairAddress, symbol, name, pairCreatedTime, addedBy
             )
             
-            if not tokenId:
-                return {'success': False, 'error': 'Failed to add token to database'}
+            # Step 2: add initial timeframe records with lastfetchedat as null
+            self.addInitialTimeframeRecords(tokenAddress, pairAddress, timeframes, pairCreatedTime, addedBy)
             
-            # Step 2: Create 15m timeframe record
-            self.trading_handler.createEmptyTimeFrameRecord(tokenAddress, pairAddress, '15m')
+            # Step 3: Fetch and persist candle data for all timeframes
+            candleResults = self.persitCandlesFetchedFromAPI(
+                tokenAddress, pairAddress, symbol, timeframes, pairCreatedTime
+            )
             
-            # Step 3: Fetch all data from pair created time to now as its a new token
-            all15MCandles = self.recordAll15MCandlesFromPairCreatedTime(tokenAddress, pairAddress, pairCreatedTime, currentTime)
+            # Step 4: Calculate and update VWAP and EMA for all timeframes
+            self.calculateAndUpdateIndicatorsForNewTokenFromAPI(tokenAddress, pairAddress, pairCreatedTime, timeframes)
             
-            if not all15MCandles['success']:
-                # Rollback token addition
-                self.trading_handler.disableToken(tokenAddress, addedBy, "Backfill failed")
-                return {'success': False, 'error': f'Backfill failed: {all15MCandles["error"]}'}
-            
-            # Step 5: Aggregate 15m -> 1h and 4h using the candles we just fetched (no DB query!)
-            self.aggregate15MInto1HrAnd4Hr(tokenAddress, pairAddress, all15MCandles.get('fetchedCandles', []))
-            
-            # Step 6: Get ALL candles for all timeframes in single database call
-            allCandles = self.trading_handler.getAllCandlesFromAllTimeframes(tokenAddress, pairAddress)
-            if not allCandles:
-                logger.warning(f"No candles found after aggregation for {tokenAddress}")
-                return {'success': True, 'tokenId': tokenId, 'mode': 'new_token_no_indicators'}
-            
-            # Step 7: Process VWAP using filtered candles (no additional DB calls)
-            calculatedVwap = self.vwap_processor.calculateVwapFromAPI(tokenAddress, pairAddress, pairCreatedTime, allCandles)
-            if not calculatedVwap['success']:
-                self.trading_handler.disableToken(tokenAddress, addedBy, f"VWAP processing failed: {calculatedVwap['error']}")
-                return calculatedVwap
-            
-            # Step 8: Process EMA using filtered candles (no additional DB calls)
-            calculatedEMA = self.ema_processor.calcualteEMAForNewTokenFromAPI(tokenAddress, pairAddress, pairCreatedTime, allCandles)
-            if not calculatedEMA['success']:
-                self.trading_handler.disableToken(tokenAddress, addedBy, f"EMA processing failed: {calculatedEMA['error']}")
-                return calculatedEMA
-            
-            return {
-                'success': True,
-                'tokenId': tokenId,
-                'mode': 'new_token_full_processing',
-                'candlesInserted': all15MCandles.get('candlesInserted', 0),
-                'creditsUsed': all15MCandles.get('creditsUsed', 0)
-            }
+            return self.constructSuccessResponseForNewTokenFromAPI(tokenId, candleResults, timeframes)
             
         except Exception as e:
-            logger.error(f"Error in new token addition: {e}")
-            try:
-                self.trading_handler.disableToken(tokenAddress, addedBy, f"Addition failed: {str(e)}")
-            except:
-                pass
-            return {'success': False, 'error': str(e)}    
-
-    def addOldToken(self, tokenAddress: str, pairAddress: str, symbol: str, name: str,
-                                     pairCreatedTime: int, perTimeframeEMAData: Dict, addedBy: str) -> Dict[str, Any]:
-        """Phase 2: Add old token with per-timeframe EMA initialization"""
-        try:
-            
-            # Step 1: Add token to trackedtokens table
-            tokenId = self.trading_handler.addToken(
-                tokenAddress=tokenAddress,
-                symbol=symbol,
-                name=name,
-                pairAddress=pairAddress,
-                pairCreatedTime=pairCreatedTime,
-                additionSource=AdditionSource.MANUAL,
-                addedBy=addedBy
+            return self.handleTokenAdditionError(tokenAddress, addedBy, e)
+    
+    def addTokenToTrackedTokensDatabase(self, tokenAddress: str, pairAddress: str, symbol: str, 
+                                name: str, pairCreatedTime: int, addedBy: str) -> int:
+        """Setup token in tracked tokens table"""
+        tokenId = self.trading_handler.addToken(
+            tokenAddress=tokenAddress,
+            symbol=symbol,
+            name=name,
+            pairAddress=pairAddress,
+            pairCreatedTime=pairCreatedTime,
+            additionSource=AdditionSource.MANUAL if addedBy != "automatic_system" else AdditionSource.AUTOMATIC,
+            addedBy=addedBy
+        )
+        
+        if not tokenId:
+            raise ValueError(ValidationMessages.FAILED_TO_ADD_TOKEN)
+        
+        return tokenId
+    
+    def addInitialTimeframeRecords(self, tokenAddress: str, pairAddress: str, 
+                                  timeframes: List[str], pairCreatedTime: int, addedBy: str):
+        """Setup timeframe metadata records for scheduling"""
+        timeframeCreated = self.trading_handler.createTimeframeInitialRecords(
+            tokenAddress, pairAddress, timeframes, pairCreatedTime
+        )
+        
+        if not timeframeCreated:
+            self.trading_handler.disableToken(tokenAddress, addedBy, "Failed to create timeframe records")
+            raise ValueError(ValidationMessages.FAILED_TIMEFRAME_RECORDS)
+    
+    def persitCandlesFetchedFromAPI(self, tokenAddress: str, pairAddress: str, symbol: str,
+                                     timeframes: List[str], pairCreatedTime: int) -> Dict:
+        """Fetch candle data for all timeframes and persist in batch"""
+        currentTime = int(time.time())
+        allCandleData = {}
+        totalCreditsUsed = 0
+        
+        for timeframe in timeframes:
+            candleResult = self.fetchCandlesFromAPI(
+                tokenAddress, pairAddress, symbol, timeframe, pairCreatedTime, currentTime
             )
             
-            if not tokenId:
-                return {'success': False, 'error': 'Failed to add token to database'}
+            if candleResult.get(CandleDataKeys.CANDLES):
+                allCandleData[f"{tokenAddress}_{timeframe}"] = {
+                    CandleDataKeys.CANDLES: candleResult[CandleDataKeys.CANDLES],
+                    CandleDataKeys.LATEST_TIME: candleResult[CandleDataKeys.LATEST_TIME],
+                    CandleDataKeys.COUNT: candleResult[CandleDataKeys.COUNT]
+                }
+                totalCreditsUsed += candleResult.get('creditsUsed', 0)
+                logger.info(f"Fetched {candleResult[CandleDataKeys.COUNT]} {timeframe} candles")
+        
+        # Persist all data in batch
+        candlesInserted = 0
+        if allCandleData:
+            candlesInserted = self.trading_handler.batchPersistAllCandles(allCandleData)
+            logger.info(f"Persisted {candlesInserted} total candles across all timeframes")
+        
+        return {'candlesInserted': candlesInserted, 'creditsUsed': totalCreditsUsed}
+    
+    def calculateAndUpdateIndicatorsForNewTokenFromAPI(self, tokenAddress: str, pairAddress: str, 
+                                       pairCreatedTime: int, timeframes: List[str]):
+        """
+        Calculate and update VWAP and EMA indicators for all timeframes
+        
+        This method processes indicators for the new token across all requested timeframes:
+        - VWAP: Volume-weighted average price calculations
+        - EMA: Exponential moving averages (21 and 34 periods)
+        """
+        try:
+            logger.info(f"Calculating indicators for {tokenAddress} across timeframes: {timeframes}")
             
-            # Step 2: Create 15m timeframe record
-            self.trading_handler.createEmptyTimeFrameRecord(tokenAddress, pairAddress, '15m')
-            
-            # Step 3: Fetch 2 days of 15m data from BirdEye API
-            candlesFromAPI = self.fetchCandlesFromAPIForTheGivenTimeRange(tokenAddress, pairAddress, 48)
-            
-            if not candlesFromAPI['success']:
-                self.trading_handler.disableToken(tokenAddress, addedBy, "Backfill failed")
-                return {'success': False, 'error': f'Backfill failed: {candlesFromAPI["error"]}'}
-            
-            # Step 4: Aggregate 15m -> 1h and 4h, create timeframe records
-            self.aggregate15MInto1HrAnd4Hr(tokenAddress, pairAddress, candlesFromAPI.get('fetchedCandles', []))
-            
-            # Step 5: Get ALL candles for all timeframes in single database call
+            # Get all candles for all timeframes that were just persisted
+            # Only process records where lastfetchedat IS NOT NULL (as per requirements)
             allCandles = self.trading_handler.getAllCandlesFromAllTimeframes(tokenAddress, pairAddress)
+            
             if not allCandles:
-                logger.warning(f"No candles found after aggregation for {tokenAddress}")
-                return {'success': True, 'tokenId': tokenId, 'mode': 'old_token_no_indicators'}
+                logger.warning(f"No candles found for indicator calculation for {tokenAddress}")
+                return
             
-            # Step 6: Process VWAP using filtered candles (no additional DB calls)
-            calculatedVwap = self.vwap_processor.calculateVwapFromAPI(tokenAddress, pairAddress, pairCreatedTime, allCandles)
-            if not calculatedVwap['success']:
-                self.trading_handler.disableToken(tokenAddress, addedBy, f"VWAP processing failed: {calculatedVwap['error']}")
-                return calculatedVwap
+            # Process VWAP for all timeframes
+            vwapResults = self.vwap_processor.calculateVWAPFromAPI(tokenAddress, pairAddress, pairCreatedTime, allCandles)
             
-            # Step 7: just set the EMA from the API in the ema states table and update the corresponding candle values in the ohlcv table
-            calculatedEMA = self.ema_processor.setEMAForOldTokenFromAPI(
+            # Process EMA for all timeframes  
+            calculatedEMA = self.ema_processor.calcualteEMAForNewTokenFromAPI(tokenAddress, pairAddress, pairCreatedTime, allCandles)
+            
+            logger.info(f"Successfully calculated indicators for {tokenAddress}")
+            
+        except Exception as e:
+            logger.error(f"Error calculating indicators for {tokenAddress}: {e}")
+            # Don't raise - indicators are supplementary, token addition should still succeed
+
+    def calculateAndUpdateIndicatorsForOldTokenFromAPI(self, tokenAddress: str, pairAddress: str, 
+                                       pairCreatedTime: int, timeframes: List[str], perTimeframeEMAData: Dict):
+        """
+        Calculate and update VWAP and EMA indicators for all timeframes
+        
+        This method processes indicators for the new token across all requested timeframes:
+        - VWAP: Volume-weighted average price calculations
+        - EMA: Exponential moving averages (21 and 34 periods)
+        """
+        try:
+            logger.info(f"Calculating indicators for {tokenAddress} across timeframes: {timeframes}")
+            
+            # Get all candles for all timeframes that were just persisted
+            # Only process records where lastfetchedat IS NOT NULL (as per requirements)
+            allCandles = self.trading_handler.getAllCandlesFromAllTimeframes(tokenAddress, pairAddress)
+            
+            if not allCandles:
+                logger.warning(f"No candles found for indicator calculation for {tokenAddress}")
+                return
+            
+            # Process VWAP for all timeframes
+            self.vwap_processor.calculateVWAPFromAPI(tokenAddress, pairAddress, pairCreatedTime, allCandles)
+           
+            
+            # Process EMA for all timeframes  
+            self.ema_processor.setEMAForOldTokenFromAPI(
                 tokenAddress, pairAddress, pairCreatedTime, perTimeframeEMAData, allCandles
             )
-            if not calculatedEMA['success']:
-                self.trading_handler.disableToken(tokenAddress, addedBy, f"EMA processing failed: {calculatedEMA['error']}")
-                return calculatedEMA
             
-            return {
-                'success': True,
-                'tokenId': tokenId,
-                'mode': 'old_token_per_timeframe_ema',
-                'candlesInserted': candlesFromAPI.get('candlesInserted', 0),
-                'creditsUsed': candlesFromAPI.get('creditsUsed', 0)
-            }
+            
+            logger.info(f"Successfully calculated indicators for {tokenAddress}")
             
         except Exception as e:
-            logger.error(f"Error in old token addition with per-timeframe EMA: {e}")
-            try:
-                self.trading_handler.disableToken(tokenAddress, addedBy, f"Addition failed: {str(e)}")
-            except:
-                pass
-            return {'success': False, 'error': str(e)}
+            logger.error(f"Error calculating indicators for {tokenAddress}: {e}")
+            # Don't raise - indicators are supplementary, token addition should still succeed
     
-    def fetchCandlesFromAPIForTheGivenTimeRange(self, tokenAddress: str, pairAddress: str, hours: int) -> Dict:
-        """Fetch historical data using unified BirdEye service (for old tokens - 2 days backfill)"""
+    def addOldTokenWithTimeframes(self, tokenAddress: str, pairAddress: str, symbol: str, name: str,
+                                 pairCreatedTime: int, timeframes: List[str], perTimeframeEMAData: Dict,
+                                 addedBy: str) -> Dict[str, Any]:
+        """
+        OLD TOKEN FLOW: Add old token (>7 days) with specified timeframes using Moralis API
+        
+        This method implements the complete old token onboarding flow:
+        1. Database setup (token + timeframe scheduling)  
+        2. Historical data fetching (48 hours) for each timeframe
+        3. Batch data persistence with timeframe updates
+        4. VWAP and EMA calculations for successfully fetched timeframes
+        """
         try:
-            # Calculate time range
-            toTime = int(time.time())
-            fromTime = toTime - (hours * 3600)
+            logger.info(f"Adding old token {symbol} with timeframes: {timeframes}")
             
-            # Use unified BirdEye service handler - just fetch, don't store
-            candleDataFromAPI = self.birdeye_handler.getAllCandleDataFromAPI(tokenAddress, pairAddress, fromTime, toTime)
-            
-            if candleDataFromAPI['success']:
-                # Format data for existing batchPersistAllCandles method
-                from scheduler.SchedulerConstants import CandleDataKeys
-                
-                allCandleData = {
-                    tokenAddress: {
-                        CandleDataKeys.CANDLES: candleDataFromAPI['candles'],
-                        CandleDataKeys.LATEST_TIME: candleDataFromAPI['latestTime'],
-                        CandleDataKeys.COUNT: candleDataFromAPI['candleCount']
-                    }
-                }
-                
-                # Use existing batch persist method from scheduler flow
-                candlesInserted = self.trading_handler.batchPersistAllCandles(allCandleData)
-                
-                return {
-                    'success': True,
-                    'candlesInserted': candlesInserted,
-                    'creditsUsed': candleDataFromAPI['creditsUsed'],
-                    'latestUnixTime': candleDataFromAPI['latestTime']
-                }
-            else:
-                return candleDataFromAPI
-            
-        except Exception as e:
-            logger.error(f"Error fetching historical data: {e}")
-            return {'success': False, 'error': str(e)}
-    
-    def recordAll15MCandlesFromPairCreatedTime(self, tokenAddress: str, pairAddress: str, pairCreatedTime: int, currentTime: int) -> Dict:
-        """Fetch all historical data from pair creation to now using unified BirdEye service (for new tokens)"""
-        try:
-            # Use unified BirdEye service handler - just fetch, don't store
-            candleDataFromAPI = self.birdeye_handler.getAllCandleDataFromAPI(tokenAddress, pairAddress, pairCreatedTime, currentTime)
-            
-            if candleDataFromAPI['success']:
-                # Format data for existing batchPersistAllCandles method
-                processedCandleData = {
-                    tokenAddress: {
-                        CandleDataKeys.CANDLES: candleDataFromAPI['candles'],
-                        CandleDataKeys.LATEST_TIME: candleDataFromAPI['latestTime'],
-                        CandleDataKeys.COUNT: candleDataFromAPI['candleCount']
-                    }
-                }
-                
-                # Use existing batch persist method from scheduler flow
-                insertedCandles = self.trading_handler.batchPersistAllCandles(processedCandleData)
-                
-                return {
-                    'success': True,
-                    'candlesInserted': insertedCandles,
-                    'creditsUsed': candleDataFromAPI['creditsUsed'],
-                    'latestUnixTime': candleDataFromAPI['latestTime'],
-                    'fetchedCandles': candleDataFromAPI['candles']
-                }
-            else:
-                return candleDataFromAPI
-            
-        except Exception as e:
-            logger.error(f"Error fetching historical data from creation: {e}")
-            return {'success': False, 'error': str(e)}
-
-    def aggregate15MInto1HrAnd4Hr(self, tokenAddress: str, pairAddress: str, all15MinCandlesFromAPI: List = None):
-        """Aggregate 15m data into 1h and 4h with batched database operations"""
-        try:
-            # Use pre-fetched candles if available, otherwise get from database
-            if all15MinCandlesFromAPI:
-                all15MinCandles = all15MinCandlesFromAPI
-                logger.info(f"Using {len(all15MinCandles)} pre-fetched 15min candles for aggregation")
-            else:
-                # Get all 15min candles from database
-                all15MinCandles = self.trading_handler.getAll15MinCandlesWithoutTimeRange(tokenAddress, pairAddress)
-                if not all15MinCandles:
-                    logger.info(f"No 15min candles found for {tokenAddress}")
-                    return
-                logger.info(f"Fetched {len(all15MinCandles)} 15min candles from database for aggregation")
-            
-            # Aggregate to 1 hour using in-memory data - returns candles and latest time
-            hourlyAggregatedCandles = TradingActionUtil.aggregateToHourlyInMemory(all15MinCandles)
-            
-            # Aggregate to 4 hour using the in-memory hourly data - returns candles and latest time
-            fourHourltAggregatedCandles = TradingActionUtil.aggregateToFourHourlyInMemory(hourlyAggregatedCandles['candles'])
-            
-            # Prepare aggregation results with latest times and next fetch times calculated during aggregation
-            aggregatedCandles = {
-                'hourly_candles': hourlyAggregatedCandles['candles'],
-                'four_hourly_candles': fourHourltAggregatedCandles['candles'],
-                'latest_1h_time': hourlyAggregatedCandles['latest_time'],
-                'latest_4h_time': fourHourltAggregatedCandles['latest_time'],
-                'next_fetch_1h_time': hourlyAggregatedCandles['next_fetch_time'],
-                'next_fetch_4h_time': fourHourltAggregatedCandles['next_fetch_time']
-            }
-            
-            # Use optimized TradingHandler method for single transaction
-            success = self.trading_handler.batchInsertAggregatedCandlesWithTimeframeUpdate(
-                aggregatedCandles, tokenAddress, pairAddress
+            # Step 1: Setup token in database
+            tokenId = self.addTokenToTrackedTokensDatabase(
+                tokenAddress, pairAddress, symbol, name, pairCreatedTime, addedBy
             )
             
-            if not success:
-                raise Exception("Failed to persist aggregation results")
+            # Step 2: Setup timeframe scheduling (with null lastfetchedat initially)
+            self.addInitialTimeframeRecords(tokenAddress, pairAddress, timeframes, pairCreatedTime, addedBy)
             
-            logger.info(f"Aggregation completed: {len(hourlyAggregatedCandles['candles'])} hourly, {len(fourHourltAggregatedCandles['candles'])} 4-hourly candles")
+            # Step 3: Fetch and persist 48-hour historical data for each timeframe
+            candleResults = self.fetchAndPersist48HourDataForOldToken(
+                tokenAddress, pairAddress, symbol, timeframes
+            )
+            
+            # Step 4: Calculate and update VWAP and EMA for successfully fetched timeframes
+            self.calculateAndUpdateIndicatorsForOldTokenFromAPI(tokenAddress, pairAddress, pairCreatedTime, timeframes, perTimeframeEMAData)
+            
+            return self.constructSuccessResponseForOldTokenFromAPI(tokenId, candleResults, timeframes, perTimeframeEMAData)
             
         except Exception as e:
-            logger.error(f"Error in aggregation: {e}")
+            return self.handleTokenAdditionError(tokenAddress, addedBy, e)
+    
+    def fetchAndPersist48HourDataForOldToken(self, tokenAddress: str, pairAddress: str, 
+                                           symbol: str, timeframes: List[str]) -> Dict:
+        """
+        Fetch 48-hour historical data for each timeframe using Moralis API and persist in batch
+        """
+        try:
+            currentTime = int(time.time())
+            fromTime = currentTime - (48 * 3600)  # 48 hours ago
+            
+            allCandleData = {}
+            totalCreditsUsed = 0
+            
+            logger.info(f"Fetching 48-hour data for {symbol} from {fromTime} to {currentTime}")
+            
+            # Fetch data for each timeframe
+            for timeframe in timeframes:
+                logger.info(f"Fetching {timeframe} data for {symbol}")
+                
+                candleDataFromAPI = self.moralis_handler.getCandleDataForToken(
+                    tokenAddress, pairAddress, fromTime, currentTime, timeframe, symbol
+                )
+                
+                if candleDataFromAPI['success'] and candleDataFromAPI[CandleDataKeys.CANDLES]:
+                    # Format for batch persistence with token_address_timeframe key
+                    key = f"{tokenAddress}_{timeframe}"
+                    allCandleData[key] = {
+                        CandleDataKeys.CANDLES: candleDataFromAPI[CandleDataKeys.CANDLES],
+                        CandleDataKeys.LATEST_TIME: candleDataFromAPI[CandleDataKeys.LATEST_TIME],
+                        CandleDataKeys.COUNT: candleDataFromAPI[CandleDataKeys.COUNT]
+                    }
+                    totalCreditsUsed += candleDataFromAPI.get('creditsUsed', 0)
+                    
+                    logger.info(f"Fetched {candleDataFromAPI[CandleDataKeys.COUNT]} {timeframe} candles for {symbol}")
+                else:
+                    logger.warning(f"Failed to fetch {timeframe} data for {symbol}: {candleDataFromAPI.get('error', 'Unknown error')}")
+            
+            # Persist all data in batch
+            candlesInserted = 0
+            if allCandleData:
+                candlesInserted = self.trading_handler.batchPersistAllCandles(allCandleData)
+                logger.info(f"Persisted {candlesInserted} total candles across all timeframes for old token {symbol}")
+            
+            return {'candlesInserted': candlesInserted, 'creditsUsed': totalCreditsUsed}
+            
+        except Exception as e:
+            logger.error(f"Error fetching 48-hour data for old token {symbol}: {e}")
             raise
     
+    def constructSuccessResponseForOldTokenFromAPI(self, tokenId: int, candleResults: Dict, 
+                                        timeframes: List[str], perTimeframeEMAData: Dict) -> Dict[str, Any]:
+        """Build success response for old token addition"""
+        return {
+            'success': True,
+            'tokenId': tokenId,
+            'flow': 'old_token_with_timeframes',
+            'timeframes': timeframes,
+            'candlesInserted': candleResults['candlesInserted'],
+            'creditsUsed': candleResults['creditsUsed'],
+            'emaDataProcessed': len(perTimeframeEMAData) if perTimeframeEMAData else 0,
+            'message': f'Old token successfully added with {len(timeframes)} timeframes'
+        }
+
+    def fetchCandlesFromAPI(self, tokenAddress: str, pairAddress: str, symbol: str,
+                               timeframe: str, pairCreatedTime: int, currentTime: int) -> Dict:
+        """Fetch candles for a specific timeframe with proper fromTime adjustment"""
+        # Calculate adjusted fromTime to avoid missing first candle 
+        # for example : is case of new tokens- it we directly pass the paircreatedtime as fromtime - 
+        # then there is a chance for the api to exclude the initial candle as the api excludes 'fromtime' 
+        # so due to this always set the 
+        # fromtime = (paircreatedtime - (timeframeseconds * 2)) - 
+        # which means if the paircreatedtime=4:56 and the time frame is 30M, 
+        # then the new fromtime =(4:56 - (30m * 2)) = (4:56 - 1hr) = 3:56
+        timeframeSeconds = TimeframeConstants.getSeconds(timeframe)
+        adjustedFromTime = pairCreatedTime - (timeframeSeconds * TokenFlowConstants.FROM_TIME_BUFFER_MULTIPLIER)
+        
+        logger.info(f"Fetching {timeframe} candles from {adjustedFromTime} to {currentTime} "
+                   f"(adjusted from pair creation time {pairCreatedTime})")
+        
+        candleResult = self.moralis_handler.getCandleDataForToken(
+            tokenAddress=tokenAddress,
+            pairAddress=pairAddress,
+            fromTime=adjustedFromTime,
+            toTime=currentTime,
+            timeframe=timeframe,
+            symbol=symbol
+        )
+        
+        if not candleResult['success']:
+            error_msg = ValidationMessages.getErrorMessage(timeframe, candleResult.get('error'))
+            logger.error(error_msg)
+            raise ValueError(error_msg)
+        
+        return candleResult
     
+    def constructSuccessResponseForNewTokenFromAPI(self, tokenId: int, candleResults: Dict, timeframes: List[str]) -> Dict:
+        """Build standardized success response"""
+        return {
+            'success': True,
+            'tokenId': tokenId,
+            'mode': TokenFlowConstants.MODE_NEW_TOKEN_WITH_TIMEFRAMES,
+            'candlesInserted': candleResults['candlesInserted'],
+            'creditsUsed': candleResults['creditsUsed'],
+            'timeframes': timeframes
+        }
     
+    def handleTokenAdditionError(self, tokenAddress: str, addedBy: str, error: Exception) -> Dict:
+        """Handle and cleanup token addition errors"""
+        logger.error(f"Error in new token addition with timeframes: {error}")
+        try:
+            self.trading_handler.disableToken(tokenAddress, addedBy, f"Addition failed: {str(error)}")
+        except:
+            pass
+        return {'success': False, 'error': str(error)}

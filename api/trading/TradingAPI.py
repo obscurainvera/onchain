@@ -6,7 +6,10 @@ from actions.TradingActionEnhanced import TradingActionEnhanced
 from logs.logger import get_logger
 from actions.DexscrennerAction import DexScreenerAction
 from api.trading.TradingAPIUtil import TradingAPIUtil
+from constants.TradingConstants import TimeframeConstants, TokenFlowConstants, ValidationMessages
 import time
+
+from scheduler.TradingScheduler import TradingScheduler
 
 logger = get_logger(__name__)
 
@@ -21,23 +24,25 @@ def addToken():
     """
     Add Token API - POST /api/tokens/add
     
-    REQUEST BODY (New tokens - no EMA required):
-    {
-        "tokenAddress": "So11111111111111111111111111111111111111112",
-        "pairAddress": "4w2cysotX6czaUGmmWg13hDpY4QEMG2CzeKYEQyK9Ama"
-    }
-    
-    REQUEST BODY (Old tokens - Per-timeframe EMA with user-friendly times):
+    REQUEST BODY (New tokens - with timeframes):
     {
         "tokenAddress": "So11111111111111111111111111111111111111112",
         "pairAddress": "4w2cysotX6czaUGmmWg13hDpY4QEMG2CzeKYEQyK9Ama",
+        "timeframes": ["30min", "1h", "4h"]
+    }
+    
+    REQUEST BODY (Old tokens - With timeframes and Per-timeframe EMA):
+    {
+        "tokenAddress": "So11111111111111111111111111111111111111112",
+        "pairAddress": "4w2cysotX6czaUGmmWg13hDpY4QEMG2CzeKYEQyK9Ama",
+        "timeframes": ["30min", "1h", "4h"],
         "ema21": {
-            "15m": {"value": 1.25, "referenceTime": "10:30 AM"},
+            "30min": {"value": 1.25, "referenceTime": "10:30 AM"},
             "1h": {"value": 1.28, "referenceTime": "10 AM"},
             "4h": {"value": 1.30, "referenceTime": "8 AM"}
         },
         "ema34": {
-            "15m": {"value": 1.22, "referenceTime": "10:30 AM"},
+            "30min": {"value": 1.22, "referenceTime": "10:30 AM"},
             "1h": {"value": 1.24, "referenceTime": "10 AM"},
             "4h": {"value": 1.26, "referenceTime": "8 AM"}
         }
@@ -47,7 +52,17 @@ def addToken():
         return jsonify({}), 200
 
     try:
-        # Step 1: Validate request data structure
+        # For testing
+        # Call trading scheduler to handle updates
+        trading_scheduler = TradingScheduler()
+        trading_scheduler.handleTradingUpdatesFromJob()
+
+        return jsonify({
+            'success': True,
+            'message': 'Trading updates scheduled successfully'
+        }), 200
+
+
         data = request.get_json()
         isValid, errorMessage, requestData = TradingAPIUtil.validateRequestData(data)
         if not isValid:
@@ -88,50 +103,23 @@ def addToken():
         tradingAction = TradingActionEnhanced(db)
 
         # Step 6: Route based on pair age
-        if pairAgeInDays <= 7:
-            # New token flow (≤7 days) - no EMA data required
-            tokenAddition = tradingAction.addNewToken(
-                tokenAddress=tokenAddress,
-                pairAddress=pairAddress,
-                symbol=tokenInfoFromAPI.symbol,
-                name=tokenInfoFromAPI.name,
-                pairCreatedTime=pairCreatedTime,
-                addedBy=addedBy
+        if pairAgeInDays <= TokenFlowConstants.NEW_TOKEN_MAX_AGE_DAYS:
+            # New token flow - requires timeframes array
+            tokenAddition = addNewToken(
+                requestData, tradingAction, tokenAddress, pairAddress, 
+                tokenInfoFromAPI, pairCreatedTime, addedBy
             )
         else:
-            # Old token flow (>7 days) - requires per-timeframe EMA data
-            processedEMAData = None
-            if requestData['ema21Data'] and requestData['ema34Data']:
-                # Validate and process per-timeframe EMA data
-                isValid, errorMessage, processedEMAData = TradingAPIUtil.validateOldTokenRequirements(
-                    pairAgeInDays,
-                    requestData['ema21Data'],
-                    requestData['ema34Data']
-                )
-                if not isValid:
-                    errorResponse, statusCode = TradingAPIUtil.formatOldTokenErrorResponse(pairAgeInDays, errorMessage)
-                    return jsonify(errorResponse), statusCode
-
-            if not processedEMAData:
-                errorResponse, statusCode = TradingAPIUtil.formatOldTokenErrorResponse(pairAgeInDays)
-                return jsonify(errorResponse), statusCode
-
-            # Convert to per-timeframe format and call old token handler
-            perTimeframeEMAData = TradingAPIUtil.convertToPerTimeframeFormat(processedEMAData)
-            tokenAddition = tradingAction.addOldToken(
-                tokenAddress=tokenAddress,
-                pairAddress=pairAddress,
-                symbol=tokenInfoFromAPI.symbol,
-                name=tokenInfoFromAPI.name,
-                pairCreatedTime=pairCreatedTime,
-                perTimeframeEMAData=perTimeframeEMAData,
-                addedBy=addedBy
+            # Old token flow (>7 days) - requires timeframes and per-timeframe EMA data
+            tokenAddition = addOldToken(
+                requestData, tradingAction, tokenAddress, pairAddress, 
+                tokenInfoFromAPI, pairCreatedTime, addedBy
             )
 
         # Step 7: Return appropriate response
         if tokenAddition['success']:
             successResponse = TradingAPIUtil.formatSuccessResponse(
-                tokenAddition, tokenAddress, pairAddress, pairAgeInDays, tokenInfoFromAPI
+                tokenAddition, tokenAddress, pairAddress, pairAgeInDays
             )
             return jsonify(successResponse), 201
         else:
@@ -326,3 +314,88 @@ def listTokens():
            'success': False,
            'error': f'Internal server error: {str(e)}'
        }), 500
+
+
+def addNewToken(requestData: dict, tradingAction, tokenAddress: str, pairAddress: str,
+                          tokenInfoFromAPI, pairCreatedTime: int, addedBy: str):
+    """
+    Handle new token flow with timeframes validation and processing
+    
+    Args:
+        requestData: Request payload containing timeframes
+        tradingAction: TradingActionEnhanced instance
+        tokenAddress: Token contract address
+        pairAddress: Token pair address
+        tokenInfoFromAPI: Token info from DexScreener
+        pairCreatedTime: Unix timestamp of pair creation
+        addedBy: User who added the token
+        
+    Returns:
+        Result from addNewTokenWithTimeframes method
+    """
+    # Extract and validate timeframes
+    timeframes = requestData.get('timeframes', [])
+    
+    # Process new token with validated timeframes
+    return tradingAction.addNewTokenWithTimeframes(
+        tokenAddress=tokenAddress,
+        pairAddress=pairAddress,
+        symbol=tokenInfoFromAPI.symbol,
+        name=tokenInfoFromAPI.name,
+        pairCreatedTime=pairCreatedTime,
+        timeframes=timeframes,
+        addedBy=addedBy
+    )
+
+
+def addOldToken(requestData: dict, tradingAction, tokenAddress: str, pairAddress: str,
+                tokenInfoFromAPI, pairCreatedTime: int, addedBy: str):
+    """
+    Handle old token flow with timeframes and EMA validation
+    
+    Args:
+        requestData: Request payload containing timeframes and EMA data
+        tradingAction: TradingActionEnhanced instance
+        tokenAddress: Token contract address
+        pairAddress: Token pair address
+        tokenInfoFromAPI: Token info from DexScreener
+        pairCreatedTime: Unix timestamp of pair creation
+        addedBy: User who added the token
+        
+    Returns:
+        Result from addOldTokenWithTimeframes method
+    """
+    # Extract and validate timeframes
+    timeframes = requestData.get('timeframes', [])
+    
+    # Validate and process EMA data
+    processedEMAData = None
+    if requestData['ema21Data'] and requestData['ema34Data']:
+        # Calculate pair age for validation
+        currentTime = int(time.time())
+        pairAgeInDays = (currentTime - pairCreatedTime) / 86400
+        
+        # Validate and process per-timeframe EMA data
+        isValid, errorMessage, processedEMAData = TradingAPIUtil.validateOldTokenRequirementsAndProcessEMAData(
+            pairAgeInDays,
+            requestData['ema21Data'],
+            requestData['ema34Data']
+        )
+        if not isValid:
+            return {'success': False, 'error': errorMessage}
+
+    if not processedEMAData:        
+        return {'success': False, 'error': 'EMA data required for old tokens'}
+
+    
+    # Process old token with validated timeframes and EMA data
+    return tradingAction.addOldTokenWithTimeframes(
+        tokenAddress=tokenAddress,
+        pairAddress=pairAddress,
+        symbol=tokenInfoFromAPI.symbol,
+        name=tokenInfoFromAPI.name,
+        pairCreatedTime=pairCreatedTime,
+        timeframes=timeframes,
+        perTimeframeEMAData=processedEMAData,
+        addedBy=addedBy
+    )
