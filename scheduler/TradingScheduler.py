@@ -1,5 +1,6 @@
 
 from config.Config import get_config
+from constants.TradingSchedulerConstants import TradingSchedulerConstants
 from database.operations.PortfolioDB import PortfolioDB
 from database.trading.TradingHandler import TradingHandler
 from database.trading.TradingModels import SchedulerConfig
@@ -40,53 +41,52 @@ class TradingScheduler:
         logger.info("Trading scheduler initialized with static SchedulerUtil methods")
 
     def handleTradingUpdatesFromJob(self):
-        """
-        Main entry point for scheduled trading updates
-        
-        This method:
-        1. Finds tokens ready for update
-        2. Processes them using SchedulerUtil batch processing
-        3. Returns success status
-        """
         try:
-            logger.info("Starting scheduled trading data updates - NEW MULTI-TIMEFRAME FLOW")
-            startTime = time.time()
-            
-            # NEW FLOW: Get all timeframe records ready for fetching (30min, 1h, 4h)
-            timeframeRecords = self.getAllTimeframeRecordsForCandleFetchingFromAPI()
-            
-            if not timeframeRecords:
-                logger.info("No timeframe records ready for update")
-                return True
-            
-            logger.info(f"Processing {len(timeframeRecords)} timeframe records for updates")
-            
-            # Process using new Moralis-based flow with batch operations
-            successCount, errorCount = self.fetchAllCandlesAndUpdateIndicators(timeframeRecords)
-            
-            elapsedTime = time.time() - startTime
-            logger.info(f"NEW FLOW: Trading updates completed: {successCount} successful, {errorCount} errors in {elapsedTime:.2f}s")
-            
-            return successCount > 0
+            logger.info("Starting trading scheduler to fetch new candles and update indicators")
+            self.fetchAllNewCandles()
+            self.calculateAndUpdateIndicators()
+            logger.info("Trading scheduler completed fetching new candles and updating indicators")
+            return True
             
         except Exception as e:
             logger.error(f"Critical error in trading updates: {e}")
             return False
 
-    def getAllTimeframeRecordsForCandleFetchingFromAPI(self) -> List[Dict[str, Any]]:
-        """
-        NEW SCHEDULER FLOW: Get all timeframe records (not just 15m) ready for data fetching
-        
-        This replaces the old 15m-only approach. Now we get ALL timeframes that need updates:
-        - 30min, 1h, 4h timeframes
-        - Uses 5-minute buffer for newly created tokens
-        - Returns timeframe-level records instead of token-level records
-        
-        Returns:
-            List of timeframe records ready for update
-        """
+    
+    def fetchAllNewCandles(self):
         try:
-            # Get all timeframe records ready for fetching with buffer
+            # NEW FLOW: Get all timeframe records ready for fetching (30min, 1h, 4h)
+            timeframeRecords = self.getAllTimeframeRecordsForCandleFetchingFromAPI()
+            if timeframeRecords:
+                allCandlesFromAPI = self.batchFetchCandles(timeframeRecords)
+                self.batchPersistCandles(allCandlesFromAPI[TradingSchedulerConstants.CandleFetching.CANDLE_DATA])
+            
+        except Exception as e:
+            logger.error(f"Critical error in new scheduler flow: {e}", exc_info=True)
+
+
+    def calculateAndUpdateIndicators(self):
+        
+        try:
+            vwapSuccess = SchedulerUtil.batchUpdateVWAPForScheduler(self.trading_handler)
+            if vwapSuccess:
+                logger.info("✓ VWAP batch processing completed successfully")
+            else:
+                logger.warning("✗ VWAP batch processing encountered errors")
+            
+           
+            emaSuccess = SchedulerUtil.batchUpdateEMAForScheduler(self.trading_handler)
+            if emaSuccess:
+                logger.info("✓ NEW EMA batch processing completed successfully")
+            else:
+                logger.warning("✗ NEW EMA batch processing encountered errors")
+        except Exception as e:
+            logger.error(f"✗ Phase 3 failed: Error in indicator processing: {e}")
+
+    
+
+    def getAllTimeframeRecordsForCandleFetchingFromAPI(self) -> List[Dict[str, Any]]:
+        try:
             timeframeRecordsReadyForFetching = self.trading_handler.getAllTimeframeRecordsReadyForFetching(
                 buffer_seconds=self.config.NEW_TOKEN_BUFFER_SECONDS
             )
@@ -97,46 +97,6 @@ class TradingScheduler:
         except Exception as e:
             logger.error(f"Error getting timeframe records ready for update: {e}")
             return []
-
-    def fetchAllCandlesAndUpdateIndicators(self, timeframeRecords: List[Dict[str, Any]]) -> tuple[int, int]:
-        """
-        NEW SCHEDULER FLOW: Process multi-timeframe records using Moralis API
-        
-        Production-ready implementation with:
-        - Modular design with focused helper methods
-        - Comprehensive error handling and logging
-        - Batch operations for optimal performance
-        - Clear separation of concerns
-        
-        Args:
-            timeframe_records: List of timeframe records ready for processing
-            
-        Returns:
-            tuple: (success_count, error_count)
-        """
-        if not timeframeRecords:
-            logger.info("No timeframe records provided for processing")
-            return 0, 0
-
-        try:
-            logger.info(f"NEW FLOW: Starting batch processing of {len(timeframeRecords)} timeframe records")
-            startTime = time.time()
-            
-            # STEP 1: Batch fetch candle data from Moralis API
-            allCandlesFromAPI = self.batchFetchCandles(timeframeRecords)
-            
-            # STEP 2: Batch persist all fetched data
-            persistedCandles = self.batchPersistCandles(allCandlesFromAPI['candleData'])
-            
-            # STEP 3: Process indicators
-            calculatedIndicators = self.calculateAndUpdateIndicators()
-            
-            # STEP 4: Log final results
-            return self.log(allCandlesFromAPI, persistedCandles, calculatedIndicators, len(timeframeRecords), startTime)
-            
-        except Exception as e:
-            logger.error(f"Critical error in new scheduler flow: {e}", exc_info=True)
-            return 0, len(timeframeRecords)
 
     def batchFetchCandles(self, timeframeRecords: List[Dict]) -> Dict:
         """
@@ -182,9 +142,9 @@ class TradingScheduler:
         logger.info(f"Phase 1 completed: {len(successfulRecords)}/{len(timeframeRecords)} successful fetches, {totalCreditsUsed} credits used")
         
         return {
-            'candleData': allCandleData,
-            'successfulRecords': successfulRecords,
-            'totalCreditsUsed': totalCreditsUsed
+            TradingSchedulerConstants.CandleFetching.CANDLE_DATA: allCandleData,
+            TradingSchedulerConstants.CandleFetching.SUCCESSFUL_RECORDS: successfulRecords,
+            TradingSchedulerConstants.CandleFetching.TOTAL_CREDITS_USED: totalCreditsUsed
         }
 
     def calculateFromTime(self, record: Dict) -> int:
@@ -257,83 +217,6 @@ class TradingScheduler:
         except Exception as e:
             logger.error(f"✗ Phase 2 failed: Error in batch persistence: {e}")
             return {'candlesInserted': 0, 'success': False, 'error': str(e)}
-
-    def calculateAndUpdateIndicators(self) -> Dict:
-        """
-        Process VWAP and EMA indicators for tokens with successful data fetches
-        
-        Uses existing SchedulerUtil batch methods for optimal performance
-        
-        Returns:
-            Dict with indicator processing results
-        """
-        
-        logger.info("Phase 3: Processing indicators for successful tokens")
-        
-        try:
-            # Batch VWAP processing with new optimized flow (processes ALL active tokens)
-            vwapSuccess = SchedulerUtil.batchUpdateVWAPForScheduler(self.trading_handler)
-            if vwapSuccess:
-                logger.info("✓ VWAP batch processing completed successfully")
-            else:
-                logger.warning("✗ VWAP batch processing encountered errors")
-            
-            # NEW EMA processing with optimized scheduler flow (no token filtering needed)
-            emaSuccess = SchedulerUtil.batchUpdateEMAForScheduler(self.trading_handler)
-            if emaSuccess:
-                logger.info("✓ NEW EMA batch processing completed successfully")
-            else:
-                logger.warning("✗ NEW EMA batch processing encountered errors")
-            
-            logger.info(f"✓ Phase 3 completed: Processed VWAP and EMA for all active tokens")
-            
-            return {
-                'vwapSuccess': vwapSuccess,
-                'emaSuccess': emaSuccess,
-                'tokensProcessed': 'all_active_tokens'
-            }
-            
-        except Exception as e:
-            logger.error(f"✗ Phase 3 failed: Error in indicator processing: {e}")
-            return {'vwapSuccess': False, 'emaSuccess': False, 'tokensProcessed': 0, 'error': str(e)}
-
-   
-
-    def log(self, fetchResults: Dict, persistResults: Dict, 
-                            indicatorResults: Dict, totalRecords: int, startTime: float) -> tuple[int, int]:
-        """
-        Log comprehensive results and return success/error counts
-        
-        Returns:
-            tuple: (success_count, error_count)
-        """
-        timeTaken = time.time() - startTime
-        successCount = len(fetchResults['successfulRecords'])
-        errorCount = totalRecords - successCount
-        
-        # Comprehensive logging
-        logger.info("=" * 80)
-        logger.info("NEW SCHEDULER FLOW - FINAL RESULTS")
-        logger.info("=" * 80)
-        logger.info(f"- Processing Summary:")
-        logger.info(f"   • Total timeframe records processed: {totalRecords}")
-        logger.info(f"   • Successful API fetches: {successCount}")
-        logger.info(f"   • Failed API fetches: {errorCount}")
-        logger.info(f"   • Total credits used: {fetchResults['totalCreditsUsed']}")
-        logger.info(f"   • Processing time: {timeTaken:.2f}s")
-        logger.info(f"")
-        logger.info(f"- Data Persistence:")
-        logger.info(f"   • Candles inserted: {persistResults['candlesInserted']}")
-        logger.info(f"   • Persistence success: {persistResults['success']}")
-        logger.info(f"")
-        logger.info(f"- Indicator Processing:")
-        logger.info(f"   • Unique tokens processed: {indicatorResults['tokensProcessed']}")
-        logger.info(f"   • VWAP processing success: {indicatorResults['vwapSuccess']}")
-        logger.info(f"   • EMA processing success: {indicatorResults['emaSuccess']}")
-        logger.info("=" * 80)
-        
-        return successCount, errorCount
-
 
     def handleTradingDataFromAPI(self) -> Dict[str, Any]:
         """

@@ -12,9 +12,12 @@ from datetime import datetime, timezone, timedelta
 from actions.TradingActionUtil import TradingActionUtil
 from scheduler.SchedulerConstants import CandleDataKeys, Timeframes
 from constants.TradingConstants import TimeframeConstants
-from constants.VWAPConstants import *
-from constants.EMAConstants import *
+
 import time
+from utils.CommonUtil import CommonUtil
+from typing import Any
+from constants.TradingHandlerConstants import TradingHandlerConstants
+from utils.IndicatorConstants import IndicatorConstants
 
 logger = get_logger(__name__)
 
@@ -162,33 +165,7 @@ class TradingHandler(BaseDBHandler):
         return self.schema.get(tableName, {})
 
     
-    
-    def _updateTimeframeFetchStatus(self, tokenAddress: str, timeframe: str, fetchTime: int) -> bool:
-        """Update timeframe fetch status"""
-        try:
-            with self.conn_manager.transaction() as cursor:
-                # Calculate next fetch time
-                if timeframe == '15m':
-                    next_fetch = fetchTime + 900
-                elif timeframe == '1h':
-                    next_fetch = fetchTime + 3600
-                elif timeframe == '4h':
-                    next_fetch = fetchTime + 14400
-                else:
-                    next_fetch = fetchTime + 900
-                
-                cursor.execute(text("""
-                    UPDATE timeframemetadata 
-                    SET lastfetchedat = %s, nextfetchat = %s, lastupdatedat = NOW()
-                    WHERE tokenaddress = %s AND timeframe = %s
-                """), (fetchTime, next_fetch, tokenAddress, timeframe))
-                
-                return cursor.rowcount > 0
-                
-        except Exception as e:
-            logger.error(f"Error updating timeframe fetch status: {e}")
-            return False
-
+        
 
     def getColumnDescription(self, tableName: str, columnName: str) -> str:
         """Get description for a specific column"""
@@ -217,52 +194,40 @@ class TradingHandler(BaseDBHandler):
             now = datetime.now(timezone.utc)
             
             with self.conn_manager.transaction() as cursor:
-                # Check if token already exists
-                cursor.execute(
-                    text("SELECT trackedtokenid, status FROM trackedtokens WHERE tokenaddress = %s"),
-                    (tokenAddress,)
-                )
-                existing = cursor.fetchone()
-                
-                if existing:
-                    if existing['status'] == 1:  # Active
-                        logger.warning(f"Token {tokenAddress} is already active")
-                        return None
-                    else:  # Disabled - reactivate
-                        cursor.execute(
-                            text("""
-                                UPDATE trackedtokens 
-                                SET status = 1, enabledat = %s, disabledat = NULL, 
-                                    lastupdatedat = %s, addedby = %s
-                                WHERE tokenaddress = %s
-                                RETURNING trackedtokenid
-                            """),
-                            (now, now, addedBy, tokenAddress)
-                        )
-                        result = cursor.fetchone()
-                        logger.info(f"Reactivated token {tokenAddress}")
-                        return result['trackedtokenid']
-                
-                # Insert new token
+                # Use UPSERT (INSERT ... ON CONFLICT ... DO UPDATE)
                 cursor.execute(
                     text("""
                         INSERT INTO trackedtokens 
-                        (tokenaddress, symbol, name, pairaddress, paircreatedtime, additionsource, addedby, metadata, createdat, lastupdatedat)
-                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                        (tokenaddress, symbol, name, pairaddress, paircreatedtime, additionsource, addedby, metadata, createdat, lastupdatedat, status, enabledat)
+                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 1, %s)
+                        ON CONFLICT (tokenaddress) 
+                        DO UPDATE SET
+                            symbol = EXCLUDED.symbol,
+                            name = EXCLUDED.name,
+                            pairaddress = EXCLUDED.pairaddress,
+                            paircreatedtime = EXCLUDED.paircreatedtime,
+                            additionsource = EXCLUDED.additionsource,
+                            addedby = EXCLUDED.addedby,
+                            metadata = EXCLUDED.metadata,
+                            lastupdatedat = EXCLUDED.lastupdatedat,
+                            status = 1,
+                            enabledat = EXCLUDED.enabledat,
+                            disabledat = NULL
                         RETURNING trackedtokenid
                     """),
                     (tokenAddress, symbol, name, pairAddress, pairCreatedTime, int(additionSource), addedBy, 
-                     json.dumps(metadata) if metadata else None, now, now)
+                     json.dumps(metadata) if metadata else None, now, now, now)
                 )
                 result = cursor.fetchone()
-                tokenId = result['trackedtokenid']
+                tokenId = result[TradingHandlerConstants.TrackedTokens.TRACKED_TOKEN_ID]
+                logger.info(f"Upserted token {tokenAddress} with ID {tokenId}")
                 return tokenId
                 
         except Exception as e:
             logger.error(f"Error adding token {tokenAddress}: {e}")
             return None
 
-    def disableToken(self, tokenAddress: str, disabledBy: str = None, reason: str = None) -> bool:
+    def disableToken(self, tokenAddress: str, disabledBy: str = None, reason: str = None) -> Dict[str, Any]:
         """
         Disable token tracking (soft delete)
         
@@ -272,19 +237,19 @@ class TradingHandler(BaseDBHandler):
             reason: Reason for disabling
             
         Returns:
-            bool: Success status
+            Dict containing success status and token info if successful
         """
         try:
             now = datetime.now(timezone.utc)
             
             with self.conn_manager.transaction() as cursor:
-                # Update token status
+                # Update token status and return token info in one query
                 cursor.execute(
                     text("""
                         UPDATE trackedtokens 
                         SET status = 2, disabledat = %s, disabledby = %s, lastupdatedat = %s
                         WHERE tokenaddress = %s AND status = 1
-                        RETURNING trackedtokenid
+                        RETURNING trackedtokenid, symbol, name, tokenaddress
                     """),
                     (now, disabledBy, now, tokenAddress)
                 )
@@ -292,24 +257,33 @@ class TradingHandler(BaseDBHandler):
                 
                 if not result:
                     logger.warning(f"Token {tokenAddress} not found or already disabled")
-                    return False
+                    return {
+                        'success': False,
+                        'error': 'Token not found or already disabled',
+                        'tokenInfo': None
+                    }
+
                 
-                # Disable timeframe metadata
-                cursor.execute(
-                    text("""
-                        UPDATE timeframemetadata 
-                        SET isactive = FALSE, lastupdatedat = %s
-                        WHERE tokenaddress = %s
-                    """),
-                    (now, tokenAddress)
-                )
+                tokenInfo = {
+                    'trackedtokenid': result['trackedtokenid'],
+                    'symbol': result['symbol'],
+                    'name': result['name'],
+                    'tokenaddress': result['tokenaddress']
+                }
                 
-                logger.info(f"Disabled token {tokenAddress} - reason: {reason}")
-                return True
+                logger.info(f"Disabled token {tokenInfo['symbol']} ({tokenAddress}) - reason: {reason}")
+                return {
+                    'success': True,
+                    'tokenInfo': tokenInfo
+                }
                 
         except Exception as e:
             logger.error(f"Error disabling token {tokenAddress}: {e}")
-            return False
+            return {
+                'success': False,
+                'error': str(e),
+                'tokenInfo': None
+            }
 
     def getActiveTokens(self) -> List[Dict]:
         """Get all active tracked tokens with their metadata"""
@@ -320,8 +294,7 @@ class TradingHandler(BaseDBHandler):
                         SELECT t.*, 
                                COUNT(tm.id) as active_timeframes
                         FROM trackedtokens t
-                        LEFT JOIN timeframemetadata tm ON t.tokenaddress = tm.tokenaddress 
-                            AND tm.isactive = TRUE
+                        LEFT JOIN timeframemetadata tm ON t.tokenaddress = tm.tokenaddress
                         WHERE t.status = 1
                         GROUP BY t.trackedtokenid
                         ORDER BY t.createdat DESC
@@ -335,297 +308,16 @@ class TradingHandler(BaseDBHandler):
 
   
     
-    def getTokensToFetch15MinCandlesWithBuffer(self, buffer_seconds: int = 300) -> List[Dict]:
-        """
-        Get tokens that need data fetching with creation time buffer (optimized version)
-        This method includes the 5-minute buffer directly in the SQL query
-        """
-        try:
-            with self.conn_manager.transaction() as cursor:
-                cursor.execute(
-                    text("""
-                        SELECT tm.*, tt.symbol, tt.name, tt.pairaddress as token_pair,
-                               EXTRACT(EPOCH FROM tt.createdat) as paircreatedtime
-                        FROM timeframemetadata tm
-                        JOIN trackedtokens tt ON tm.tokenaddress = tt.tokenaddress
-                        WHERE tm.timeframe = '15m'
-                          AND tm.nextfetchat <= EXTRACT(EPOCH FROM NOW())
-                          AND tm.isactive = TRUE
-                          AND tt.status = 1
-                          AND (tt.createdat IS NULL OR tt.createdat <= NOW() - INTERVAL '%s seconds')
-                        ORDER BY tm.nextfetchat ASC
-                    """),
-                    (buffer_seconds)
-                )
-                results = cursor.fetchall()
-                return [dict(row) for row in results]
-        except Exception as e:
-            logger.error(f"Error getting tokens due for fetch with buffer: {e}")
-            return []
-
     
-    def getCandlesForAggregationFromScheduler(self, tokenAddresses: List[str]) -> Dict[str, Dict]:
-        """
-        Get all 15m candles using MIN(last_1h_fetch, last_4h_fetch) for each token.
-        
-        FIXED LOGIC:
-        1. First get timeframe metadata for all tokens
-        2. Calculate MIN fetch time per token
-        3. Get 15m candles where unixtime > calculated MIN for each token
-
-        15M :7:00 , 7:15, 7:30, 7:45, 8:00 , 8:15, 8:30, 8:45,9:00, 9:15, 9:30, 9:45,10:00, 10:15, 10:30, 10:45,11:00, 11:15, 11:30, 11:45,12:00, 12:15, 12:30, 12:45
-        1hr : 8:00, 9:00, 10:00, 11:00   -- next fetch = 12:00, latest fetch = 11:00
-        4hr : 8:00 --- next fetch = 12:00, latest fetch = 8:00
-
-        now as the min latest fetch time is 8:00, we get all the candles from 8 till 12, even though 1 hr has till 11, we aggregate from 9,10,11,12 for 1hr and persist only 12 - now we have persisted 12 for 1hr 
-        time frame - we need to update 12 as last fetched time and 13:00 as next fetch time
-        Aggregate 1h: 12:00 → persist 12:00 (>= 12:00 nextfetchat)
-        Aggregate 4h: 12:00 → persist 12:00 (>= 12:00 nextfetchat)
-        Update: lastfetchedat = 12:00, nextfetchat = 13:00 (1h) / 16:00 (4h)
-        """
-        try:
-            with self.conn_manager.transaction() as cursor:
-                # Step 1: Get timeframe metadata for all requested tokens
-                cursor.execute(text("""
-                    WITH fetch_times AS (
-                        SELECT 
-                            t.tokenaddress,
-                            COALESCE(tm1h.lastfetchedat, 0) as lastfetchedat_1h,
-                            COALESCE(tm4h.lastfetchedat, 0) as lastfetchedat_4h,
-                            COALESCE(tm1h.nextfetchat, 0) as nextfetchat_1h,
-                            COALESCE(tm4h.nextfetchat, 0) as nextfetchat_4h,
-                            LEAST(
-                                COALESCE(tm1h.nextfetchat, 0),
-                                COALESCE(tm4h.nextfetchat, 0)
-                            ) as min_next_fetch_time
-                        FROM unnest(%s) AS t(tokenaddress)
-                        LEFT JOIN timeframemetadata tm1h ON t.tokenaddress = tm1h.tokenaddress 
-                            AND tm1h.timeframe = '1h'
-                        LEFT JOIN timeframemetadata tm4h ON t.tokenaddress = tm4h.tokenaddress 
-                            AND tm4h.timeframe = '4h'
-                    )
-                    SELECT 
-                        o.tokenaddress,
-                        o.pairaddress,
-                        o.unixtime,
-                        o.openprice,
-                        o.highprice,
-                        o.lowprice,
-                        o.closeprice,
-                        o.volume,
-                        ft.lastfetchedat_1h,
-                        ft.lastfetchedat_4h,
-                        ft.nextfetchat_1h,
-                        ft.nextfetchat_4h
-                    FROM ohlcvdetails o
-                    INNER JOIN fetch_times ft ON o.tokenaddress = ft.tokenaddress
-                    WHERE o.timeframe = '15m'
-                        AND o.iscomplete = TRUE
-                        AND o.unixtime >= ft.min_next_fetch_time
-                    ORDER BY o.tokenaddress, o.unixtime ASC
-                """), (tokenAddresses,))
-                
-                # Group 15m candles by token with fetch time metadata
-                results = {}
-                for row in cursor.fetchall():
-                    tokenAddress = row['tokenaddress']
-                    if tokenAddress not in results:
-                        results[tokenAddress] = {
-                            'candles_15m': [],
-                            'lastfetchedat_1h': row['lastfetchedat_1h'],
-                            'lastfetchedat_4h': row['lastfetchedat_4h'], 
-                            'nextfetchat_1h': row['nextfetchat_1h'],
-                            'nextfetchat_4h': row['nextfetchat_4h'],
-                            'pairaddress': row['pairaddress']
-                        }
-                    
-                    results[tokenAddress]['candles_15m'].append({
-                        'tokenaddress': row['tokenaddress'],
-                        'pairaddress': row['pairaddress'],
-                        'unixtime': row['unixtime'],
-                        'openprice': float(row['openprice']),
-                        'highprice': float(row['highprice']),
-                        'lowprice': float(row['lowprice']),
-                        'closeprice': float(row['closeprice']),
-                        'volume': float(row['volume'])
-                    })
-                return results
-                
-        except Exception as e:
-            logger.error(f"Error getting candles for aggregation: {e}")
-            return {}
-
-    def batchInsertAggregatedCandlesAndUpdateFetchTimes(self, aggregatedCandles: List[Dict], timeframes: List[str]) -> int:
-        """
-        ATOMIC: Batch insert aggregated candles AND upsert fetch times in single transaction
-        """
-        try:
-            if not aggregatedCandles:
-                return 0
-            
-            with self.conn_manager.transaction() as cursor:
-                # STEP 1: Insert aggregated candles
-                candleInsertData = self.constructOHLCVDetailsData(aggregatedCandles)
-                self.insertOHLCVDetailsData(cursor, candleInsertData)
-                
-                # STEP 2: Update timeframe metadata
-                timeframeUpdateData = self.constructTimeFrameUpdateData(aggregatedCandles)
-                self.insertTimeFrameUpdatesData(cursor, timeframeUpdateData)
-                
-                return len(aggregatedCandles)
-            
-        except Exception as e:
-            logger.error(f"Error batch inserting aggregated candles and updating fetch times: {e}")
-            return 0
     
-    def constructOHLCVDetailsData(self, aggregatedCandles: List[Dict]) -> List[tuple]:
-        """Prepare candle data for batch insert"""
-        insertData = []
-        for candle in aggregatedCandles:
-            timebucket = self._calculateTimeBucket(candle['unixtime'], candle['timeframe'])
-            insertData.append((
-                candle['tokenaddress'], candle['pairaddress'], candle['timeframe'],
-                candle['unixtime'], timebucket, candle['openprice'], candle['highprice'],
-                candle['lowprice'], candle['closeprice'], candle['volume'], 
-                int(candle.get('trades', 0)), True  # trades, iscomplete=True
-            ))
-        return insertData
+    
+    
+   
     
     def _calculateTimeBucket(self, unixtime: int, timeframe: str) -> int:
-        """Calculate timebucket based on timeframe"""
-        if timeframe == '1h':
-            return (unixtime // 3600) * 3600
-        elif timeframe == '4h':
-            return (unixtime // 14400) * 14400
-        else:
-            return unixtime
-    
-    def insertOHLCVDetailsData(self, cursor, insertData: List[tuple]):
-        """Execute batch candle inserts"""
-        cursor.executemany("""
-            INSERT INTO ohlcvdetails 
-            (tokenaddress, pairaddress, timeframe, unixtime, timebucket, openprice, 
-             highprice, lowprice, closeprice, volume, trades, datasource, iscomplete, createdat, lastupdatedat)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 'aggregated', %s, NOW(), NOW())
-            ON CONFLICT (tokenaddress, timeframe, unixtime) DO NOTHING
-        """, insertData)
-    
-    def constructTimeFrameUpdateData(self, aggregatedCandles: List[Dict]) -> List[tuple]:
-        """Prepare timeframe metadata update data"""
-        # OPTIMIZED: Single pass to group by token+timeframe with all needed data
-        tokenTimeframeData = {}
-        
-        for candle in aggregatedCandles:
-            key = (candle['tokenaddress'], candle['timeframe'])
-            if key not in tokenTimeframeData:
-                tokenTimeframeData[key] = {
-                    'pairaddress': candle['pairaddress'],
-                    'latest_time': candle['unixtime']
-                }
-            else:
-                # Only update latest_time if this candle is newer
-                tokenTimeframeData[key]['latest_time'] = max(
-                    tokenTimeframeData[key]['latest_time'], 
-                    candle['unixtime']
-                )
-        
-        # Build update data with next fetch time calculation
-        updateData = []
-        for (tokenAddress, timeframe), data in tokenTimeframeData.items():
-            nextFetchTime = self._calculateNextFetchTime(data['latest_time'], timeframe)
-            if nextFetchTime:  # Only add if valid timeframe
-                updateData.append((
-                    tokenAddress, data['pairaddress'], timeframe,
-                    nextFetchTime, data['latest_time'], nextFetchTime, data['latest_time']
-                ))
-        
-        return updateData
-    
-    def _calculateNextFetchTime(self, latestTime: int, timeframe: str) -> int:
-        """Calculate next fetch time based on timeframe"""
-        timeframeSeconds = {'1h': 3600, '4h': 14400}
-        return latestTime + timeframeSeconds.get(timeframe, 0)
-    
-    def insertTimeFrameUpdatesData(self, cursor, updateData: List[tuple]):
-        """Execute batch timeframe metadata updates"""
-        if not updateData:
-            return
-            
-        cursor.executemany("""
-            INSERT INTO timeframemetadata 
-            (tokenaddress, pairaddress, timeframe, nextfetchat, lastfetchedat, createdat, lastupdatedat)
-            VALUES (%s, %s, %s, %s, %s, NOW(), NOW())
-            ON CONFLICT (tokenaddress, pairaddress, timeframe)
-            DO UPDATE SET 
-                nextfetchat = %s,
-                lastfetchedat = %s,
-                lastupdatedat = NOW()
-        """, updateData)
-        
-        logger.debug(f"Updated fetch times for {len(updateData)} token-timeframe combinations")
-    
-    def get2DayHistoricalData(self, tokenAddresses: List[str], days: int = 2) -> Dict[str, Dict]:
-        """
-        Get historical data for multiple tokens across all timeframes for the specified number of days
-        
-        Args:
-            tokenAddresses: List of token addresses
-            days: Number of days of historical data to fetch
-            
-        Returns:
-            Dict: {token_address: {timeframe: [candles]}}
-        """
-        try:
-            if not tokenAddresses:
-                return {}
-                
-            # Calculate cutoff time (N days ago at start of day)
-            
-            # Get current time and go back N days to start of day (00:00:00)
-            currentTime = datetime.now(timezone.utc)
-            daysAgo = currentTime.replace(hour=0, minute=0, second=0, microsecond=0) - timedelta(days=days)
-            cutoffTime = int(daysAgo.timestamp())
-            
-            with self.conn_manager.transaction() as cursor:
-                cursor.execute(text("""
-                    SELECT tokenaddress, pairaddress, timeframe, unixtime,
-                           openprice, highprice, lowprice, closeprice, volume, trades
-                    FROM ohlcvdetails 
-                    WHERE tokenaddress = ANY(%s) 
-                        AND unixtime >= %s
-                        AND iscomplete = TRUE
-                    ORDER BY tokenaddress, timeframe, unixtime ASC
-                """), (tokenAddresses, cutoffTime))
-                
-                # Group results by token and timeframe
-                results = {}
-                for row in cursor.fetchall():
-                    tokenAddress = row['tokenaddress']
-                    timeframe = row['timeframe']
-                    
-                    if tokenAddress not in results:
-                        results[tokenAddress] = {}
-                    if timeframe not in results[tokenAddress]:
-                        results[tokenAddress][timeframe] = []
-                    
-                    results[tokenAddress][timeframe].append({
-                        'tokenaddress': row['tokenaddress'],
-                        'pairaddress': row['pairaddress'],
-                        'timeframe': timeframe,
-                        'unixtime': row['unixtime'],
-                        'openprice': float(row['openprice']),
-                        'highprice': float(row['highprice']),
-                        'lowprice': float(row['lowprice']),
-                        'closeprice': float(row['closeprice']),
-                        'volume': float(row['volume']),
-                        'trades': int(row['trades'])
-                    })
-                
-                return results
-                
-        except Exception as e:
-            logger.error(f"Error getting {days}-day historical data: {e}")
-            return {}
+        """Calculate timebucket based on timeframe - delegates to CommonUtil"""
+        return CommonUtil.calculateInitialStartTime(unixtime, timeframe)
+
     
     def batchPersistAllCandles(self, candleData: Dict[str, Dict]) -> int:
         """
@@ -670,7 +362,7 @@ class TradingHandler(BaseDBHandler):
                         
                     # Get metadata from first candle and data
                     firstCandle = candles[0]
-                    pairAddress = firstCandle['pairaddress']
+                    pairAddress = firstCandle[TradingHandlerConstants.OHLCVDetails.PAIR_ADDRESS]
                     latestTime = data[CandleDataKeys.LATEST_TIME]
                     
                     # Calculate next fetch time based on timeframe
@@ -685,10 +377,17 @@ class TradingHandler(BaseDBHandler):
                     # Prepare candle insert data
                     for candle in candles:
                         ohlcvDetailsData.append((
-                            candle['tokenaddress'], candle['pairaddress'], candle['timeframe'],
-                            candle['unixtime'], candle['openprice'], candle['highprice'],
-                            candle['lowprice'], candle['closeprice'], candle['volume'], 
-                            int(candle.get('trades', 0)), candle['datasource']
+                            candle[TradingHandlerConstants.OHLCVDetails.TOKEN_ADDRESS], 
+                            candle[TradingHandlerConstants.OHLCVDetails.PAIR_ADDRESS], 
+                            candle[TradingHandlerConstants.OHLCVDetails.TIMEFRAME],
+                            candle[TradingHandlerConstants.OHLCVDetails.UNIX_TIME], 
+                            candle[TradingHandlerConstants.OHLCVDetails.OPEN_PRICE], 
+                            candle[TradingHandlerConstants.OHLCVDetails.HIGH_PRICE],
+                            candle[TradingHandlerConstants.OHLCVDetails.LOW_PRICE], 
+                            candle[TradingHandlerConstants.OHLCVDetails.CLOSE_PRICE], 
+                            candle[TradingHandlerConstants.OHLCVDetails.VOLUME], 
+                            int(candle.get(TradingHandlerConstants.OHLCVDetails.TRADES, 0)), 
+                            candle[TradingHandlerConstants.OHLCVDetails.DATA_SOURCE]
                         ))
                         totalCandles += 1
                 
@@ -713,23 +412,12 @@ class TradingHandler(BaseDBHandler):
             parts = key.rsplit('_', 1)  # Split from right to handle addresses with underscores
             if len(parts) == 2:
                 return parts[0], parts[1]
-            else:
-                # Fallback: assume key is just token address (old format)
-                return key, '15m'
         except Exception:
             return None, None
     
     def calculateNextFetchTimeForTimeframe(self, latestTime: int, timeframe: str) -> int:
-        """Calculate next fetch time based on specific timeframe"""
-        timeframe_seconds_map = { # needs to change
-            '15m': 900,
-            '30min': 1800, 
-            '1h': 3600,
-            '4h': 14400
-        }
-        
-        seconds = timeframe_seconds_map.get(timeframe, 900)
-        return latestTime + seconds
+        """Calculate next fetch time based on specific timeframe - delegates to CommonUtil"""
+        return CommonUtil.calculateNextFetchTimeForTimeframe(latestTime, timeframe)
     
     def batchUpdateTimeframe(self, cursor, timeframeUpdateData: List[Tuple]) -> Dict[Tuple, int]:
         """Update timeframe metadata and return mapping of (token, timeframe) -> id"""
@@ -804,226 +492,6 @@ class TradingHandler(BaseDBHandler):
     
 
     
-    def getAllVWAPSessionInfo(self, token_addresses: List[str], timeframes: List[str]) -> Dict[str, Dict[str, Optional[Dict]]]:
-        """
-        Get VWAP session information for multiple tokens and timeframes in single query
-        
-        Returns:
-            Dict: {token_address: {timeframe: session_info_dict or None}}
-        """
-        try:
-            if not token_addresses or not timeframes:
-                return {}
-            
-            with self.conn_manager.transaction() as cursor:
-                cursor.execute(text("""
-                    SELECT tokenaddress, timeframe, sessionstartunix, sessionendunix, 
-                           cumulativepv, cumulativevolume, currentvwap, lastcandleunix, nextcandlefetch
-                    FROM vwapsessions 
-                    WHERE tokenaddress = ANY(%s) AND timeframe = ANY(%s)
-                """), (token_addresses, timeframes))
-                
-                # Initialize result structure
-                results = {}
-                for token_address in token_addresses:
-                    results[token_address] = {}
-                    for timeframe in timeframes:
-                        results[token_address][timeframe] = None
-                
-                # Populate with actual data
-                for row in cursor.fetchall():
-                    token_address = row['tokenaddress']
-                    timeframe = row['timeframe']
-                    results[token_address][timeframe] = {
-                        'sessionstartunix': row['sessionstartunix'],
-                        'sessionendunix': row['sessionendunix'], 
-                        'cumulativepv': Decimal(str(row['cumulativepv'])),
-                        'cumulativevolume': Decimal(str(row['cumulativevolume'])),
-                        'currentvwap': Decimal(str(row['currentvwap'])),
-                        'lastcandleunix': row['lastcandleunix'],
-                        'nextcandlefetch': row['nextcandlefetch']
-                    }
-                
-                return results
-        except Exception as e:
-            logger.error(f"Error getting batch VWAP session info: {e}")
-            return {}
-    
-    def getAllLastFetchTimes(self, tokenAddresses: List[str], timeframes: List[str]) -> Dict[str, Dict[str, Optional[int]]]:
-        """
-        Get last fetch times for multiple tokens and timeframes in single query
-        
-        Returns:
-            Dict: {token_address: {timeframe: unix_timestamp or None}}
-        """
-        try:
-            if not tokenAddresses or not timeframes:
-                return {}
-            
-            with self.conn_manager.transaction() as cursor:
-                cursor.execute(text("""
-                    SELECT tokenaddress, timeframe, lastfetchedat as lastfetchedat_unix
-                    FROM timeframemetadata 
-                    WHERE tokenaddress = ANY(%s) AND timeframe = ANY(%s)
-                """), (tokenAddresses, timeframes))
-                
-                # Initialize result structure
-                results = {}
-                for tokenAddress in tokenAddresses:
-                    results[tokenAddress] = {}
-                    for timeframe in timeframes:
-                        results[tokenAddress][timeframe] = None
-                
-                # Populate with actual data
-                for row in cursor.fetchall():
-                    tokenAddress = row['tokenaddress']
-                    timeframe = row['timeframe']
-                    unixTime = int(row['lastfetchedat_unix']) if row['lastfetchedat_unix'] else None
-                    results[tokenAddress][timeframe] = unixTime
-                
-                return results
-        except Exception as e:
-            logger.error(f"Error getting batch last fetch times: {e}")
-            return {}
-    
-    
-    def getAllEMAStateInfo(self, token_addresses: List[str], timeframes: List[str], ema_periods: List[int]) -> Dict[str, Dict[str, Dict[int, Optional[Dict]]]]:
-        """
-        Get EMA state information for multiple tokens, timeframes, and periods in single query
-        
-        Returns:
-            Dict: {token_address: {timeframe: {ema_period: ema_state_dict or None}}}
-        """
-        try:
-            if not token_addresses or not timeframes or not ema_periods:
-                return {}
-            
-            ema_period_strings = [str(p) for p in ema_periods]
-            
-            with self.conn_manager.transaction() as cursor:
-                cursor.execute(text("""
-                    SELECT tokenaddress, timeframe, emakey, emavalue, status, 
-                           lastupdatedunix, nextfetchtime, emaavailabletime
-                    FROM emastates 
-                    WHERE tokenaddress = ANY(%s) AND timeframe = ANY(%s) AND emakey = ANY(%s)
-                """), (token_addresses, timeframes, ema_period_strings))
-                
-                # Initialize result structure
-                results = {}
-                for token_address in token_addresses:
-                    results[token_address] = {}
-                    for timeframe in timeframes:
-                        results[token_address][timeframe] = {}
-                        for ema_period in ema_periods:
-                            results[token_address][timeframe][ema_period] = None
-                
-                # Populate with actual data
-                for row in cursor.fetchall():
-                    token_address = row['tokenaddress']
-                    timeframe = row['timeframe']
-                    ema_period = int(row['emakey'])
-                    
-                    results[token_address][timeframe][ema_period] = {
-                        'emavalue': Decimal(str(row['emavalue'])) if row['emavalue'] else None,
-                        'status': row['status'],
-                        'lastupdatedunix': row['lastupdatedunix'],
-                        'nextfetchtime': row['nextfetchtime'],
-                        'emaavailabletime': row['emaavailabletime']
-                    }
-                
-                return results
-        except Exception as e:
-            logger.error(f"Error getting batch EMA state info: {e}")
-            return {}
-    
-    
-    
-    def getBatchVWAPCandles(self, vwapOperations: List[Dict]) -> Dict[str, List[Dict]]:
-        """
-        Get all required VWAP candles for multiple operations in single query
-        
-        Args:
-            vwap_operations: List of operations with keys:
-                - token_address, timeframe, operation_type, from_time, to_time (optional)
-        x
-        Returns:
-            Dict: {f"{token_address}_{timeframe}_{operation_type}": [candles]}
-        """
-        try:
-            if not vwapOperations:
-                return {}
-            
-            # Build UNION query for all different candle requirements
-            union_queries = []
-            params = []
-            
-            for i, op in enumerate(vwapOperations):
-                operation_id = f"{op['token_address']}_{op['timeframe']}_{op['operation_type']}"
-                
-                if op['operation_type'] == 'new_session':
-                    # Get all candles since pair creation
-                    union_queries.append(f"""
-                        SELECT '{operation_id}' as operation_id, 
-                               unixtime, highprice, lowprice, closeprice, volume
-                        FROM ohlcvdetails 
-                        WHERE tokenaddress = %s AND timeframe = %s AND unixtime >= %s
-                            AND iscomplete = TRUE
-                    """)
-                    params.extend([op['token_address'], op['timeframe'], op['from_time']])
-                
-                elif op['operation_type'] == 'same_day_update':
-                    # Get candles after last candle time
-                    union_queries.append(f"""
-                        SELECT '{operation_id}' as operation_id,
-                               unixtime, highprice, lowprice, closeprice, volume
-                        FROM ohlcvdetails 
-                        WHERE tokenaddress = %s AND timeframe = %s AND unixtime > %s
-                            AND iscomplete = TRUE
-                    """)
-                    params.extend([op['token_address'], op['timeframe'], op['from_time']])
-                
-                elif op['operation_type'] == 'new_day_reset':
-                    # Get candles for specific date range
-                    union_queries.append(f"""
-                        SELECT '{operation_id}' as operation_id,
-                               unixtime, highprice, lowprice, closeprice, volume
-                        FROM ohlcvdetails 
-                        WHERE tokenaddress = %s AND timeframe = %s 
-                            AND unixtime >= %s AND unixtime <= %s
-                            AND iscomplete = TRUE
-                    """)
-                    params.extend([op['token_address'], op['timeframe'], op['from_time'], op['to_time']])
-            
-            if not union_queries:
-                return {}
-            
-            # Execute single UNION query
-            final_query = " UNION ALL ".join(union_queries) + " ORDER BY operation_id, unixtime ASC"
-            
-            with self.conn_manager.transaction() as cursor:
-                cursor.execute(text(final_query), params)
-                
-                # Group results by operation_id
-                results = {}
-                for row in cursor.fetchall():
-                    operation_id = row['operation_id']
-                    if operation_id not in results:
-                        results[operation_id] = []
-                    
-                    results[operation_id].append({
-                        'unixtime': row['unixtime'],
-                        'highprice': float(row['highprice']),
-                        'lowprice': float(row['lowprice']),
-                        'closeprice': float(row['closeprice']),
-                        'volume': float(row['volume'])
-                    })
-                
-                return results
-                
-        except Exception as e:
-            logger.error(f"Error getting batch VWAP candles: {e}")
-            return {}
-    
     def getAllVWAPDataForScheduler(self) -> Dict[str, Dict[str, Dict]]:
         """
         Get all VWAP data for scheduler processing - all active tokens and timeframes.
@@ -1055,9 +523,11 @@ class TradingHandler(BaseDBHandler):
                         ohlcv.volume
                     FROM trackedtokens tt
                     INNER JOIN timeframemetadata tm ON tt.tokenaddress = tm.tokenaddress
-                    LEFT JOIN vwapsessions vs ON tt.tokenaddress = vs.tokenaddress AND tm.timeframe = vs.timeframe
+                    LEFT JOIN vwapsessions vs ON tt.tokenaddress = vs.tokenaddress 
+                        AND tt.pairaddress = vs.pairaddress 
+                        AND tm.timeframe = vs.timeframe
                     LEFT JOIN ohlcvdetails ohlcv ON tt.tokenaddress = ohlcv.tokenaddress 
-                        AND tm.timeframe = ohlcv.timeframe 
+                        AND tm.id = ohlcv.timeframeid 
                         AND ohlcv.unixtime > COALESCE(vs.lastcandleunix, 0)
                     WHERE tt.status = 1
                     ORDER BY tt.tokenaddress, tm.timeframe, ohlcv.unixtime
@@ -1069,9 +539,9 @@ class TradingHandler(BaseDBHandler):
                 vwapDataByToken = {}
                 
                 for record in records:
-                    tokenAddress = record['tokenaddress']
-                    pairAddress = record['pairaddress']
-                    timeframe = record['timeframe']
+                    tokenAddress = record[TradingHandlerConstants.TrackedTokens.TOKEN_ADDRESS]
+                    pairAddress = record[TradingHandlerConstants.TrackedTokens.PAIR_ADDRESS]
+                    timeframe = record[TradingHandlerConstants.TimeframeMetadata.TIMEFRAME]
                     
                     if tokenAddress not in vwapDataByToken:
                         vwapDataByToken[tokenAddress] = {}
@@ -1079,31 +549,31 @@ class TradingHandler(BaseDBHandler):
                     if timeframe not in vwapDataByToken[tokenAddress]:
                         # Initialize timeframe data
                         vwapDataByToken[tokenAddress][timeframe] = {
-                            'tokenAddress': tokenAddress,
-                            'pairAddress': pairAddress,
-                            'timeframe': timeframe,
-                            'lastFetchedAt': record['lastfetchedat'],
-                            'sessionStartUnix': record['sessionstartunix'],
-                            'sessionEndUnix': record['sessionendunix'],
-                            'cumulativePV': record['cumulativepv'],
-                            'cumulativeVolume': record['cumulativevolume'],
-                            'currentVWAP': record['currentvwap'],
-                            'lastCandleUnix': record['lastcandleunix'] or 0,
-                            'nextCandleFetch': record['nextcandlefetch'],
-                            'candles': []
+                            TradingHandlerConstants.TrackedTokens.TOKEN_ADDRESS: tokenAddress,
+                            TradingHandlerConstants.TrackedTokens.PAIR_ADDRESS: pairAddress,
+                            TradingHandlerConstants.TimeframeMetadata.TIMEFRAME: timeframe,
+                            TradingHandlerConstants.TimeframeMetadata.LAST_FETCHED_AT: record[TradingHandlerConstants.TimeframeMetadata.LAST_FETCHED_AT],
+                            TradingHandlerConstants.VWAPSessions.SESSION_START_UNIX: record[TradingHandlerConstants.VWAPSessions.SESSION_START_UNIX],
+                            TradingHandlerConstants.VWAPSessions.SESSION_END_UNIX: record[TradingHandlerConstants.VWAPSessions.SESSION_END_UNIX],
+                            TradingHandlerConstants.VWAPSessions.CUMULATIVE_PV: record[TradingHandlerConstants.VWAPSessions.CUMULATIVE_PV],
+                            TradingHandlerConstants.VWAPSessions.CUMULATIVE_VOLUME: record[TradingHandlerConstants.VWAPSessions.CUMULATIVE_VOLUME],
+                            TradingHandlerConstants.VWAPSessions.CURRENT_VWAP: record[TradingHandlerConstants.VWAPSessions.CURRENT_VWAP],
+                            TradingHandlerConstants.VWAPSessions.LAST_CANDLE_UNIX: record[TradingHandlerConstants.VWAPSessions.LAST_CANDLE_UNIX] or 0,
+                            TradingHandlerConstants.VWAPSessions.NEXT_CANDLE_FETCH: record[TradingHandlerConstants.VWAPSessions.NEXT_CANDLE_FETCH],
+                            IndicatorConstants.VWAPSessions.CANDLES: []
                         }
                     
                     # Add candle data if available
-                    if record['unixtime'] is not None:
+                    if record[TradingHandlerConstants.OHLCVDetails.UNIX_TIME] is not None:
                         candle = {
-                            'unixtime': record['unixtime'],
-                            'openprice': record['openprice'],
-                            'highprice': record['highprice'],
-                            'lowprice': record['lowprice'],
-                            'closeprice': record['closeprice'],
-                            'volume': record['volume']
+                            TradingHandlerConstants.OHLCVDetails.UNIX_TIME: record[TradingHandlerConstants.OHLCVDetails.UNIX_TIME],
+                            TradingHandlerConstants.OHLCVDetails.OPEN_PRICE: record[TradingHandlerConstants.OHLCVDetails.OPEN_PRICE],
+                            TradingHandlerConstants.OHLCVDetails.HIGH_PRICE: record[TradingHandlerConstants.OHLCVDetails.HIGH_PRICE],
+                            TradingHandlerConstants.OHLCVDetails.LOW_PRICE: record[TradingHandlerConstants.OHLCVDetails.LOW_PRICE],
+                            TradingHandlerConstants.OHLCVDetails.CLOSE_PRICE: record[TradingHandlerConstants.OHLCVDetails.CLOSE_PRICE],
+                            TradingHandlerConstants.OHLCVDetails.VOLUME: record[TradingHandlerConstants.OHLCVDetails.VOLUME]
                         }
-                        vwapDataByToken[tokenAddress][timeframe]['candles'].append(candle)
+                        vwapDataByToken[tokenAddress][timeframe][IndicatorConstants.VWAPSessions.CANDLES].append(candle)
                 
                 logger.info(f"Retrieved VWAP data for {len(vwapDataByToken)} active tokens")
                 return vwapDataByToken
@@ -1130,10 +600,10 @@ class TradingHandler(BaseDBHandler):
                     vwapCandleData = []
                     for update in vwapCandleUpdatedData:
                         vwapCandleData.append((
-                            float(update[VWAP_VALUE]),
-                            update[TOKEN_ADDRESS],
-                            update[TIMEFRAME], 
-                            update[CANDLE_UNIX]
+                            float(update[TradingHandlerConstants.OHLCVDetails.VWAP_VALUE]),
+                            update[TradingHandlerConstants.OHLCVDetails.TOKEN_ADDRESS],
+                            update[TradingHandlerConstants.OHLCVDetails.TIMEFRAME], 
+                            update[TradingHandlerConstants.OHLCVDetails.UNIX_TIME]
                         ))
                     
                     cursor.executemany("""
@@ -1147,16 +617,16 @@ class TradingHandler(BaseDBHandler):
                     vwapSessionData = []
                     for update in vwapSessionUpdatedData:
                         vwapSessionData.append((
-                            update[TOKEN_ADDRESS],
-                            update[PAIR_ADDRESS],
-                            update[TIMEFRAME],
-                            update[SESSION_START_UNIX],
-                            update[SESSION_END_UNIX],
-                            float(update[CUMULATIVE_PV]),
-                            float(update[CUMULATIVE_VOLUME]),
-                            float(update[CURRENT_VWAP]),
-                            update[LAST_CANDLE_UNIX],
-                            update[NEXT_CANDLE_FETCH]
+                            update[TradingHandlerConstants.VWAPSessions.TOKEN_ADDRESS],
+                            update[TradingHandlerConstants.VWAPSessions.PAIR_ADDRESS],
+                            update[TradingHandlerConstants.VWAPSessions.TIMEFRAME],
+                            update[TradingHandlerConstants.VWAPSessions.SESSION_START_UNIX],
+                            update[TradingHandlerConstants.VWAPSessions.SESSION_END_UNIX],
+                            float(update[TradingHandlerConstants.VWAPSessions.CUMULATIVE_PV]),
+                            float(update[TradingHandlerConstants.VWAPSessions.CUMULATIVE_VOLUME]),
+                            float(update[TradingHandlerConstants.VWAPSessions.CURRENT_VWAP]),
+                            update[TradingHandlerConstants.VWAPSessions.LAST_CANDLE_UNIX],
+                            update[TradingHandlerConstants.VWAPSessions.NEXT_CANDLE_FETCH]
                         ))
                     
                     cursor.executemany("""
@@ -1183,7 +653,7 @@ class TradingHandler(BaseDBHandler):
             logger.error(f"Error in batch VWAP update: {e}")
             return False
     
-    def getAllEMADataWithCandlesForScheduler(self, timeframes: List[str], emaPeriods: List[int]) -> Dict[str, Dict]:
+    def getAllEMADataWithCandlesForScheduler(self) -> Dict[str, Dict]:
         """
         SINGLE OPTIMIZED QUERY: Get all EMA data with corresponding candles for scheduler
         
@@ -1215,12 +685,7 @@ class TradingHandler(BaseDBHandler):
                 }
             }
         """
-        try:
-            if not timeframes or not emaPeriods:
-                return {}
-            
-            emaPeriodList = [str(p) for p in emaPeriods]
-            
+        try:        
             with self.conn_manager.transaction() as cursor:
                 # Single optimized query with JOINs
                 cursor.execute(text("""
@@ -1237,15 +702,13 @@ class TradingHandler(BaseDBHandler):
                             tmf.lastfetchedat,
                             CASE 
                                 WHEN es.status = 2 THEN es.lastupdatedunix  -- AVAILABLE: get candles after last updated
-                                WHEN es.status = 1 AND tmf.lastfetchedat >= es.emaavailabletime THEN es.emaavailabletime  -- NOT_AVAILABLE_READY: get candles from available time
+                                WHEN es.status = 1 AND tmf.lastfetchedat >= es.emaavailabletime THEN 0  -- NOT_AVAILABLE_READY: get ALL candles (for initial SMA calculation)
                                 ELSE 0  -- NOT_AVAILABLE_INSUFFICIENT: no candles needed
                             END as candle_from_time
                         FROM emastates es
                         INNER JOIN trackedtokens tt ON es.tokenaddress = tt.tokenaddress AND es.pairaddress = tt.pairaddress
                         INNER JOIN timeframemetadata tmf ON es.tokenaddress = tmf.tokenaddress AND es.timeframe = tmf.timeframe
-                        WHERE es.timeframe = ANY(%s) 
-                          AND es.emakey = ANY(%s)
-                          AND tt.status = 1
+                        WHERE tt.status = 1
                           AND tmf.isactive = TRUE
                     ),
                     candle_data AS (
@@ -1258,8 +721,8 @@ class TradingHandler(BaseDBHandler):
                             o.closeprice
                         FROM ema_data ed
                         INNER JOIN ohlcvdetails o ON ed.tokenaddress = o.tokenaddress AND ed.timeframe = o.timeframe
-                        WHERE ed.candle_from_time > 0 
-                          AND o.unixtime > ed.candle_from_time
+                        WHERE ed.candle_from_time >= 0 
+                          AND (ed.candle_from_time = 0 OR o.unixtime > ed.candle_from_time)
                           AND o.iscomplete = TRUE
                     )
                     SELECT 
@@ -1278,45 +741,45 @@ class TradingHandler(BaseDBHandler):
                     LEFT JOIN candle_data cd ON ed.tokenaddress = cd.tokenaddress 
                         AND ed.timeframe = cd.timeframe 
                         AND ed.emakey = cd.emakey
-                    WHERE ed.candle_from_time > 0
+                    WHERE ed.candle_from_time >= 0
                     ORDER BY ed.tokenaddress, ed.timeframe, ed.emakey, cd.unixtime ASC
-                """), (timeframes, emaPeriodList))
+                """))
                 
                 # Organize results into the required structure
                 results = {}
                 
                 for row in cursor.fetchall():
-                    tokenAddress = row['tokenaddress']
-                    pairAddress = row['pairaddress']
-                    timeframe = row['timeframe']
-                    emaKey = row['emakey']
+                    tokenAddress = row[TradingHandlerConstants.EMAStates.TOKEN_ADDRESS]
+                    pairAddress = row[TradingHandlerConstants.EMAStates.PAIR_ADDRESS]
+                    timeframe = row[TradingHandlerConstants.EMAStates.TIMEFRAME]
+                    emaKey = row[TradingHandlerConstants.EMAStates.EMA_KEY]
                     emaPeriod = int(emaKey)
                     
                     # Initialize token structure if not exists
                     if tokenAddress not in results:
                         results[tokenAddress] = {
-                            'pair_id': pairAddress,
-                            'ema21': {},
-                            'ema34': {}
+                            IndicatorConstants.EMAStates.PAIR_ID: pairAddress,
+                            IndicatorConstants.EMAStates.EMA21: {},
+                            IndicatorConstants.EMAStates.EMA34: {}
                         }
                     
                     # Initialize EMA structure if not exists
                     ema_key_lower = f"ema{emaPeriod}"
                     if timeframe not in results[tokenAddress][ema_key_lower]:
                         results[tokenAddress][ema_key_lower][timeframe] = {
-                            'ema_value': float(row['emavalue']) if row['emavalue'] else None,
-                            'last_updated_at': row['lastupdatedunix'],
-                            'status': row['status'],
-                            'ema_available_at': row['emaavailabletime'],
-                            'last_fetched_at': row['lastfetchedat'],
-                            'candles': []
+                            TradingHandlerConstants.EMAStates.EMA_VALUE: float(row[TradingHandlerConstants.EMAStates.EMA_VALUE]) if row[TradingHandlerConstants.EMAStates.EMA_VALUE] else None,
+                            TradingHandlerConstants.EMAStates.LAST_UPDATED_UNIX: row[TradingHandlerConstants.EMAStates.LAST_UPDATED_UNIX],
+                            TradingHandlerConstants.EMAStates.STATUS: row[TradingHandlerConstants.EMAStates.STATUS],
+                            TradingHandlerConstants.EMAStates.EMA_AVAILABLE_TIME: row[TradingHandlerConstants.EMAStates.EMA_AVAILABLE_TIME],
+                            TradingHandlerConstants.TimeframeMetadata.LAST_FETCHED_AT: row[TradingHandlerConstants.TimeframeMetadata.LAST_FETCHED_AT],
+                            IndicatorConstants.EMAStates.CANDLES: []
                         }
                     
                     # Add candle if exists
-                    if row['candle_unixtime']:
-                        results[tokenAddress][ema_key_lower][timeframe]['candles'].append({
-                            'unixtime': row['candle_unixtime'],
-                            'closeprice': float(row['candle_closeprice'])
+                    if row[IndicatorConstants.EMAStates.CANDLE_UNIX_TIME]:
+                        results[tokenAddress][ema_key_lower][timeframe][IndicatorConstants.EMAStates.CANDLES].append({
+                            IndicatorConstants.EMAStates.CANDLE_UNIX_TIME: row[IndicatorConstants.EMAStates.CANDLE_UNIX_TIME],
+                            IndicatorConstants.EMAStates.CANDLE_CLOSE_PRICE: float(row[IndicatorConstants.EMAStates.CANDLE_CLOSE_PRICE])
                         })
                 
                 return results
@@ -1325,169 +788,7 @@ class TradingHandler(BaseDBHandler):
             logger.error(f"Error getting EMA data with candles for scheduler: {e}")
             return {}
 
-    def getAllCandlesNeededToCalculateEMA(self, infoNeededToCalculateEMA: List[Dict]) -> Dict[str, List[Dict]]:
-        """
-        Get all required EMA candles for multiple operations in single query
-        
-        Args:
-            ema_operations: List of operations with keys:
-                - token_address, timeframe, operation_type, from_time, ema_period
-        
-        Returns:
-            Dict: {f"{token_address}_{timeframe}_{ema_period}_{operation_type}": [candles]}
-        """
-        try:
-            if not infoNeededToCalculateEMA:
-                return {}
-            
-            # Build UNION query for all different candle requirements
-            union_queries = []
-            params = []
-            
-            for op in infoNeededToCalculateEMA:
-                operation_id = f"{op['token_address']}_{op['timeframe']}_{op['ema_period']}_{op['operation_type']}"
-                
-                if op['operation_type'] == 'first_calculation':
-                    # Get all candles since ema available time
-                    union_queries.append(f"""
-                        SELECT '{operation_id}' as operation_id,
-                               unixtime, closeprice
-                        FROM ohlcvdetails 
-                        WHERE tokenaddress = %s AND timeframe = %s AND unixtime >= %s
-                            AND iscomplete = TRUE
-                    """)
-                    params.extend([op['token_address'], op['timeframe'], op['from_time']])
-                
-                elif op['operation_type'] == 'incremental_update':
-                    # Get candles after last updated time
-                    union_queries.append(f"""
-                        SELECT '{operation_id}' as operation_id,
-                               unixtime, closeprice
-                        FROM ohlcvdetails 
-                        WHERE tokenaddress = %s AND timeframe = %s AND unixtime > %s
-                            AND iscomplete = TRUE
-                    """)
-                    params.extend([op['token_address'], op['timeframe'], op['from_time']])
-            
-            if not union_queries:
-                return {}
-            
-            # Execute single UNION query
-            final_query = " UNION ALL ".join(union_queries) + " ORDER BY operation_id, unixtime ASC"
-            
-            with self.conn_manager.transaction() as cursor:
-                cursor.execute(text(final_query), params)
-                
-                # Group results by operation_id
-                results = {}
-                for row in cursor.fetchall():
-                    operation_id = row['operation_id']
-                    if operation_id not in results:
-                        results[operation_id] = []
-                    
-                    results[operation_id].append({
-                        'unixtime': row['unixtime'],
-                        'closeprice': float(row['closeprice'])
-                    })
-                
-                return results
-                
-        except Exception as e:
-            logger.error(f"Error getting batch EMA candles: {e}")
-            return {}
     
-    def batchInsertAggregatedCandlesWithTimeframeUpdate(self, aggregatedCandles: Dict, tokenAddress: str, pairAddress: str) -> bool:
-        """
-        Optimized method: Insert aggregated candles AND create/update timeframe records in single transaction
-        Eliminates the need for separate create -> update operations
-        """
-        try:
-            with self.conn_manager.transaction() as cursor:
-                hourlyCandles = aggregatedCandles['hourly_candles']
-                fourHourCandles = aggregatedCandles['four_hourly_candles']
-                latestFetchedTimeFor1Hr = aggregatedCandles['latest_1h_time']
-                latestFetchedTimeFor4Hr = aggregatedCandles['latest_4h_time']
-                nextFetchTimeFor1Hr = aggregatedCandles['next_fetch_1h_time']
-                nextFetchTimeFor4Hr = aggregatedCandles['next_fetch_4h_time']
-                
-                # 1. Insert hourly candles if any
-                if hourlyCandles and latestFetchedTimeFor1Hr:
-                    # Insert candles
-                    insertQueryDataForHourlyCandles = []
-                    for candle in hourlyCandles:
-                        insertQueryDataForHourlyCandles.append((
-                            tokenAddress, pairAddress, '1h',
-                            candle['unixtime'], candle['openprice'], candle['highprice'],
-                            candle['lowprice'], candle['closeprice'], candle['volume'],
-                            int(candle.get('trades', 0))
-                        ))
-                    
-                    cursor.executemany("""
-                        INSERT INTO ohlcvdetails 
-                        (tokenaddress, pairaddress, timeframe, unixtime, openprice, 
-                         highprice, lowprice, closeprice, volume, trades)
-                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-                        ON CONFLICT (tokenaddress, timeframe, unixtime) DO NOTHING
-                    """, insertQueryDataForHourlyCandles)
-                    
-                    # Create/update timeframe record with pre-calculated next fetch time in one operation
-                    cursor.execute(text("""
-                        INSERT INTO timeframemetadata 
-                        (tokenaddress, pairaddress, timeframe, lastfetchedat, nextfetchat, createdat, lastupdatedat)
-                        VALUES (%s, %s, %s, %s, %s, NOW(), NOW())
-                        ON CONFLICT (tokenaddress, pairaddress, timeframe)
-                        DO UPDATE SET 
-                            lastfetchedat = %s,
-                            nextfetchat = %s,
-                            lastupdatedat = NOW()
-                    """), (tokenAddress, pairAddress, '1h', 
-                           latestFetchedTimeFor1Hr, nextFetchTimeFor1Hr,
-                           latestFetchedTimeFor1Hr, nextFetchTimeFor1Hr))
-                    
-                    logger.info(f"Inserted {len(hourlyCandles)} hourly candles and updated timeframe in single operation")
-                
-                # 2. Insert 4-hourly candles if any
-                if fourHourCandles and latestFetchedTimeFor4Hr:
-                    # Insert candles
-                    insertQueryDataForFourHourlyCandles = []
-                    for candle in fourHourCandles:
-                        insertQueryDataForFourHourlyCandles.append((
-                            tokenAddress, pairAddress, '4h',
-                            candle['unixtime'], candle['openprice'], candle['highprice'],
-                            candle['lowprice'], candle['closeprice'], candle['volume'],
-                            int(candle.get('trades', 0))
-                        ))
-                    
-                    cursor.executemany("""
-                        INSERT INTO ohlcvdetails 
-                        (tokenaddress, pairaddress, timeframe, unixtime, openprice, 
-                         highprice, lowprice, closeprice, volume, trades)
-                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-                        ON CONFLICT (tokenaddress, timeframe, unixtime) DO NOTHING
-                    """, insertQueryDataForFourHourlyCandles)
-                    
-                    # Create/update timeframe record with pre-calculated next fetch time in one operation
-                    cursor.execute(text("""
-                        INSERT INTO timeframemetadata 
-                        (tokenaddress, pairaddress, timeframe, lastfetchedat, nextfetchat, createdat, lastupdatedat)
-                        VALUES (%s, %s, %s, %s, %s, NOW(), NOW())
-                        ON CONFLICT (tokenaddress, pairaddress, timeframe)
-                        DO UPDATE SET 
-                            lastfetchedat = %s,
-                            nextfetchat = %s,
-                            lastupdatedat = NOW()
-                    """), (tokenAddress, pairAddress, '4h', 
-                           latestFetchedTimeFor4Hr, nextFetchTimeFor4Hr,
-                           latestFetchedTimeFor4Hr, nextFetchTimeFor4Hr))
-                    
-                    logger.info(f"Inserted {len(fourHourCandles)} 4-hourly candles and updated timeframe in single operation")
-                
-                logger.info("All aggregation operations completed in optimized single transaction")
-                return True
-                
-        except Exception as e:
-            logger.error(f"Error in optimized aggregation transaction: {e}")
-            return False
 
     def createTimeframeInitialRecords(self, tokenAddress: str, pairAddress: str, timeframes: List[str], 
                                     pairCreatedTime: int) -> bool:
@@ -1532,36 +833,14 @@ class TradingHandler(BaseDBHandler):
         timeframeRecords = []
         
         for timeframe in timeframes:
-            timeframeSeconds = TimeframeConstants.getSeconds(timeframe)
-            if not timeframeSeconds:
-                logger.warning(f"Unknown timeframe: {timeframe}")
-                continue
-            
-            # Calculate scheduling times
-            firstCandleTime, nextFetchTime = self.calcualteScheduling(
-                pairCreatedTime, timeframeSeconds
-            )
+            nextFetchTime = CommonUtil.calculateNextFetchTimeForInitialTimeframeRecord(pairCreatedTime, timeframe)
             
             timeframeRecords.append((
                 tokenAddress, pairAddress, timeframe, nextFetchTime
             ))
-            
-            logger.debug(f"Timeframe {timeframe}: pair created at {pairCreatedTime}, "
-                        f"first candle at {firstCandleTime}, next fetch at {nextFetchTime}")
         
         return timeframeRecords
-    
-    def calcualteScheduling(self, pairCreatedTime: int, timeframeSeconds: int) -> Tuple[int, int]:
-        """
-        Calculate when first candle completes and when scheduler should fetch next
-        
-        Logic: If pair created at 10:23 and timeframe is 1h:
-        - First complete candle is at 10:00
-        - Next fetch time is at 11:00 [this is when there will be a initial completed candle]
-        """
-        firstCandleTime = ((pairCreatedTime // timeframeSeconds)) * timeframeSeconds
-        nextFetchTime = firstCandleTime + timeframeSeconds
-        return firstCandleTime, nextFetchTime
+
     
     def recordInitialTimeframeEntry(self, cursor, timeframeRecords: List[Tuple]):
         """Insert timeframe records in batch"""
@@ -1591,20 +870,20 @@ class TradingHandler(BaseDBHandler):
                     ema21Data = []
                     ema34Data = []
                     
-                    for update in emaCandlesUpdatedData:
-                        if update[EMA_PERIOD] == EMA_21:
+                    for stateData in emaCandlesUpdatedData:
+                        if stateData[IndicatorConstants.EMAStates.EMA_PERIOD] == IndicatorConstants.EMAStates.EMA_21:
                             ema21Data.append((
-                                float(update[EMA_VALUE]),
-                                update[TOKEN_ADDRESS],
-                                update[TIMEFRAME],
-                                update[CANDLE_UNIX]
+                                float(stateData[IndicatorConstants.EMAStates.EMA_VALUE]),
+                                stateData[TradingHandlerConstants.OHLCVDetails.TOKEN_ADDRESS],
+                                stateData[TradingHandlerConstants.OHLCVDetails.TIMEFRAME],
+                                stateData[TradingHandlerConstants.OHLCVDetails.UNIX_TIME]
                             ))
-                        elif update[EMA_PERIOD] == EMA_34:
+                        elif stateData[IndicatorConstants.EMAStates.EMA_PERIOD] == IndicatorConstants.EMAStates.EMA_34:
                             ema34Data.append((
-                                float(update[EMA_VALUE]),
-                                update[TOKEN_ADDRESS],
-                                update[TIMEFRAME],
-                                update[CANDLE_UNIX]
+                                float(stateData[IndicatorConstants.EMAStates.EMA_VALUE]),
+                                stateData[TradingHandlerConstants.OHLCVDetails.TOKEN_ADDRESS],
+                                stateData[TradingHandlerConstants.OHLCVDetails.TIMEFRAME],
+                                stateData[TradingHandlerConstants.OHLCVDetails.UNIX_TIME]
                             ))
                     
                     # Batch update EMA21 values
@@ -1626,19 +905,19 @@ class TradingHandler(BaseDBHandler):
                 # STEP 2: Batch update EMA states
                 if emaStateUpdatedData:
                     emaStateData = []
-                    for update in emaStateUpdatedData:
+                    for stateData in emaStateUpdatedData:
                         # Calculate next fetch time
-                        timeframeSeconds = TradingActionUtil.getTimeframeSeconds(update[TIMEFRAME])
-                        nextFetchTime = update[LAST_UPDATED_UNIX] + timeframeSeconds
+                        timeframeSeconds = CommonUtil.getTimeframeSeconds(stateData[TradingHandlerConstants.EMAStates.TIMEFRAME])
+                        nextFetchTime = stateData[TradingHandlerConstants.EMAStates.LAST_UPDATED_UNIX] + timeframeSeconds
                         
                         emaStateData.append((
-                            float(update[EMA_VALUE]),
-                            update[LAST_UPDATED_UNIX],
+                            float(stateData[TradingHandlerConstants.EMAStates.EMA_VALUE]),
+                            stateData[TradingHandlerConstants.EMAStates.LAST_UPDATED_UNIX],
                             nextFetchTime,
-                            update[STATUS],
-                            update[TOKEN_ADDRESS],
-                            update[TIMEFRAME],
-                            str(update[EMA_PERIOD])
+                            stateData[TradingHandlerConstants.EMAStates.STATUS],
+                            stateData[TradingHandlerConstants.EMAStates.TOKEN_ADDRESS],
+                            stateData[TradingHandlerConstants.EMAStates.TIMEFRAME],
+                            str(stateData[IndicatorConstants.EMAStates.EMA_PERIOD])
                         ))
                     
                     cursor.executemany("""
@@ -1693,22 +972,22 @@ class TradingHandler(BaseDBHandler):
                 # Group candles by timeframe - empty lists for timeframes with no candles
                 timeframeCandlesMap = {}
                 for row in results:
-                    timeframe = row['timeframe']
+                    timeframe = row[TradingHandlerConstants.TimeframeMetadata.TIMEFRAME]
                     
                     # Initialize timeframe if not exists
                     if timeframe not in timeframeCandlesMap:
                         timeframeCandlesMap[timeframe] = []
-                    
+
                     # Add candle data if it exists (LEFT JOIN may return NULL values)
-                    if row['unixtime'] is not None:
+                    if row[TradingHandlerConstants.OHLCVDetails.UNIX_TIME] is not None:
                         timeframeCandlesMap[timeframe].append({
-                            'unixtime': row['unixtime'],
-                            'openprice': row['openprice'],
-                            'highprice': row['highprice'],
-                            'lowprice': row['lowprice'],
-                            'closeprice': row['closeprice'],
-                            'volume': row['volume'],
-                            'trades': row['trades']
+                            TradingHandlerConstants.OHLCVDetails.UNIX_TIME: row[TradingHandlerConstants.OHLCVDetails.UNIX_TIME],
+                            TradingHandlerConstants.OHLCVDetails.OPEN_PRICE: row[TradingHandlerConstants.OHLCVDetails.OPEN_PRICE],
+                            TradingHandlerConstants.OHLCVDetails.HIGH_PRICE: row[TradingHandlerConstants.OHLCVDetails.HIGH_PRICE],
+                            TradingHandlerConstants.OHLCVDetails.LOW_PRICE: row[TradingHandlerConstants.OHLCVDetails.LOW_PRICE],
+                            TradingHandlerConstants.OHLCVDetails.CLOSE_PRICE: row[TradingHandlerConstants.OHLCVDetails.CLOSE_PRICE],
+                            TradingHandlerConstants.OHLCVDetails.VOLUME: row[TradingHandlerConstants.OHLCVDetails.VOLUME],
+                            TradingHandlerConstants.OHLCVDetails.TRADES: row[TradingHandlerConstants.OHLCVDetails.TRADES]
                         })
                 
                 logger.info(f"Retrieved candles for {len(timeframeCandlesMap)} timeframes: "
@@ -1766,17 +1045,17 @@ class TradingHandler(BaseDBHandler):
                 timeframeRecords = []
                 for row in results:
                     timeframeRecords.append({
-                        'timeframeid': row['timeframeid'],
-                        'tokenaddress': row['tokenaddress'],
-                        'pairaddress': row['pairaddress'], 
-                        'timeframe': row['timeframe'],
-                        'nextfetchat': row['nextfetchat'],
-                        'lastfetchedat': row['lastfetchedat'],
-                        'symbol': row['symbol'],
-                        'name': row['name'],
-                        'paircreatedtime': row['paircreatedtime'],
-                        'createdat': row['createdat'],
-                        'trackedtokenid': row['trackedtokenid']
+                        TradingHandlerConstants.TimeframeMetadata.TIMEFRAME_ID   : row[TradingHandlerConstants.TimeframeMetadata.TIMEFRAME_ID],
+                        TradingHandlerConstants.TimeframeMetadata.TOKEN_ADDRESS: row[TradingHandlerConstants.TimeframeMetadata.TOKEN_ADDRESS],
+                        TradingHandlerConstants.TimeframeMetadata.PAIR_ADDRESS: row[TradingHandlerConstants.TimeframeMetadata.PAIR_ADDRESS], 
+                        TradingHandlerConstants.TimeframeMetadata.TIMEFRAME: row[TradingHandlerConstants.TimeframeMetadata.TIMEFRAME],
+                        TradingHandlerConstants.TimeframeMetadata.NEXT_FETCH_AT: row[TradingHandlerConstants.TimeframeMetadata.NEXT_FETCH_AT],
+                        TradingHandlerConstants.TimeframeMetadata.LAST_FETCHED_AT: row[TradingHandlerConstants.TimeframeMetadata.LAST_FETCHED_AT],
+                        TradingHandlerConstants.TrackedTokens.SYMBOL: row[TradingHandlerConstants.TrackedTokens.SYMBOL],
+                        TradingHandlerConstants.TrackedTokens.NAME: row[TradingHandlerConstants.TrackedTokens.NAME],
+                        TradingHandlerConstants.TrackedTokens.PAIR_CREATED_TIME: row[TradingHandlerConstants.TrackedTokens.PAIR_CREATED_TIME],
+                        TradingHandlerConstants.TimeframeMetadata.CREATED_AT: row[TradingHandlerConstants.TimeframeMetadata.CREATED_AT],
+                        TradingHandlerConstants.TrackedTokens.TRACKED_TOKEN_ID: row[TradingHandlerConstants.TrackedTokens.TRACKED_TOKEN_ID]
                     })
                 
                 logger.info(f"Found {len(timeframeRecords)} timeframe records ready for fetching")
@@ -1797,30 +1076,30 @@ class TradingHandler(BaseDBHandler):
                 vwapCandleUpdateData = []
                 vwapSessionUpdateData = []
                 
-                for operation in calcuatedVwapData:
-                    timeframe = operation['timeframe']
-                    calculatedVwap = operation['vwap_result']
-                    nextFetchAtTime = operation['next_candle_fetch']
-                    dayStart = operation['day_start']
-                    dayEnd = operation['day_end']  # Use pre-calculated dayEnd
+                for vwapData in calcuatedVwapData:
+                    timeframe = vwapData[TradingHandlerConstants.TimeframeMetadata.TIMEFRAME]
+                    calculatedVwap = vwapData[TradingHandlerConstants.VWAPSessions.CURRENT_VWAP]
+                    nextFetchAtTime = vwapData[TradingHandlerConstants.VWAPSessions.NEXT_CANDLE_FETCH]
+                    dayStart = vwapData[TradingHandlerConstants.VWAPSessions.SESSION_START_UNIX]
+                    dayEnd = vwapData[TradingHandlerConstants.VWAPSessions.SESSION_END_UNIX]  # Use pre-calculated dayEnd
                     
                     # FIXED: Update each candle with its corresponding VWAP value instead of final VWAP for all
-                    for candle_vwap in calculatedVwap['candle_vwaps']:
+                    for candleVWAP in calculatedVwap[IndicatorConstants.VWAPSessions.CANDLE_VWAPS]:
                         vwapCandleUpdateData.append((
-                            float(candle_vwap['vwap']),  # Use individual candle VWAP
+                            float(candleVWAP[TradingHandlerConstants.OHLCVDetails.VWAP_VALUE]),  # Use individual candle VWAP
                             tokenAddress,
                             pairAddress,
                             timeframe,
-                            candle_vwap['unixtime']
+                            candleVWAP[TradingHandlerConstants.OHLCVDetails.UNIX_TIME]
                         ))
                     
                     # Collect VWAP session data for batch execution using pre-calculated dayEnd
                     vwapSessionUpdateData.append((
                         tokenAddress, pairAddress, timeframe, dayStart, dayEnd,
-                        float(calculatedVwap.get('cumulative_pv', 0)), 
-                        float(calculatedVwap.get('cumulative_volume', 0)),
-                        float(calculatedVwap.get('final_vwap', 0)), 
-                        calculatedVwap.get('latest_candle_time'),
+                        float(calculatedVwap.get(TradingHandlerConstants.VWAPSessions.CUMULATIVE_PV, 0)), 
+                        float(calculatedVwap.get(TradingHandlerConstants.VWAPSessions.CUMULATIVE_VOLUME, 0)),
+                        float(calculatedVwap.get(TradingHandlerConstants.VWAPSessions.CURRENT_VWAP, 0)), 
+                        calculatedVwap.get(TradingHandlerConstants.VWAPSessions.LAST_CANDLE_UNIX),
                         nextFetchAtTime
                     ))
                 
@@ -1860,23 +1139,6 @@ class TradingHandler(BaseDBHandler):
 
 
 
-    def getAll15MinCandlesWithoutTimeRange(self, tokenAddress: str, pairAddress: str) -> List[Dict]:
-        """Get all 15min candles for aggregation"""
-        try:
-            with self.trading_handler.conn_manager.transaction() as cursor:
-                cursor.execute(text("""
-                    SELECT unixtime, openprice, highprice, lowprice, closeprice, volume, trades
-                    FROM ohlcvdetails 
-                    WHERE tokenaddress = %s AND pairaddress = %s AND timeframe = '15m' 
-                    ORDER BY unixtime ASC
-                """), (tokenAddress, pairAddress))
-                
-                return [dict(row) for row in cursor.fetchall()]
-                
-        except Exception as e:
-            logger.error(f"Error getting 15min candles: {e}")
-            return []
-
 
 
     def updateEMA(self, emaStateUpdatedData: List[Dict], emaCandleUpdatedData: List[Dict]):
@@ -1893,16 +1155,16 @@ class TradingHandler(BaseDBHandler):
                     emaStateUpdateQueryData = []
                     for emaState in emaStateUpdatedData:
                         emaStateUpdateQueryData.append((
-                            emaState['tokenAddress'],
-                            emaState['pairAddress'],
-                            emaState['timeframe'],
-                            emaState['emaKey'],
-                            emaState['emaValue'],
-                            emaState['lastUpdatedUnix'],
-                            emaState['nextFetchTime'],
-                            emaState['emaAvailableTime'],
-                            emaState['pairCreatedTime'],
-                            int(emaState['status'])
+                            emaState[TradingHandlerConstants.EMAStates.TOKEN_ADDRESS],
+                            emaState[TradingHandlerConstants.EMAStates.PAIR_ADDRESS],
+                            emaState[TradingHandlerConstants.EMAStates.TIMEFRAME],
+                            emaState[TradingHandlerConstants.EMAStates.EMA_KEY],
+                            emaState[TradingHandlerConstants.EMAStates.EMA_VALUE],
+                            emaState[TradingHandlerConstants.EMAStates.LAST_UPDATED_UNIX],
+                            emaState[TradingHandlerConstants.EMAStates.NEXT_FETCH_TIME],
+                            emaState[TradingHandlerConstants.EMAStates.EMA_AVAILABLE_TIME],
+                            emaState[TradingHandlerConstants.EMAStates.PAIR_CREATED_TIME],
+                            int(emaState[TradingHandlerConstants.EMAStates.STATUS])
                         ))
                     
                     cursor.executemany("""
@@ -1928,19 +1190,19 @@ class TradingHandler(BaseDBHandler):
                     ema34Updates = []
                     
                     for candle in emaCandleUpdatedData:
-                        if candle['ema_period'] == 21:
+                        if candle[IndicatorConstants.EMAStates.EMA_PERIOD] == IndicatorConstants.EMAStates.EMA_21:
                             ema21Updates.append((
-                                candle['ema_value'],
-                                candle['tokenAddress'],
-                                candle['timeframe'],
-                                candle['unixtime']
+                                candle[IndicatorConstants.EMAStates.EMA_VALUE],
+                                candle[TradingHandlerConstants.EMAStates.TOKEN_ADDRESS],
+                                candle[TradingHandlerConstants.EMAStates.TIMEFRAME],
+                                candle[TradingHandlerConstants.OHLCVDetails.UNIX_TIME]
                             ))
-                        elif candle['ema_period'] == 34:
+                        elif candle[IndicatorConstants.EMAStates.EMA_PERIOD] == IndicatorConstants.EMAStates.EMA_34:
                             ema34Updates.append((
-                                candle['ema_value'],
-                                candle['tokenAddress'],
-                                candle['timeframe'],
-                                candle['unixtime']
+                                candle[IndicatorConstants.EMAStates.EMA_VALUE],
+                                candle[TradingHandlerConstants.EMAStates.TOKEN_ADDRESS],
+                                candle[TradingHandlerConstants.EMAStates.TIMEFRAME],
+                                candle[TradingHandlerConstants.OHLCVDetails.UNIX_TIME]
                             ))
                     
                     # Update EMA21 values

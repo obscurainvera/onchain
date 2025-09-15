@@ -5,6 +5,8 @@ import Home from './components/Home';
 import TradingAttentionReport from './components/TradingAttentionReport';
 import PortfolioCalculator from './components/PortfolioCalculator';
 import TokenAddPage from './components/TokenAddPage';
+import TokenListPage from './components/TokenListPage';
+import TokenDisablePage from './components/TokenDisablePage';
 import './App.css';
 import { FaCoins } from 'react-icons/fa';
 
@@ -24,6 +26,8 @@ function App() {
             <NavLink to="/tradingattention" className={({ isActive }) => isActive ? "App-link active" : "App-link"}>Trading Attention</NavLink>
             <NavLink to="/calculator" className={({ isActive }) => isActive ? "App-link active" : "App-link"}>Calculator</NavLink>
             <NavLink to="/addtoken" className={({ isActive }) => isActive ? "App-link active" : "App-link"}>Add Token</NavLink>
+            <NavLink to="/tokens" className={({ isActive }) => isActive ? "App-link active" : "App-link"}>Token List</NavLink>
+            <NavLink to="/disabletoken" className={({ isActive }) => isActive ? "App-link active" : "App-link"}>Disable Token</NavLink>
           </nav>
         </header>
         <main className="container fade-in">
@@ -32,6 +36,8 @@ function App() {
             <Route path="/tradingattention" element={<TradingAttentionReport />} />
             <Route path="/calculator" element={<PortfolioCalculator />} />
             <Route path="/addtoken" element={<TokenAddPage />} />
+            <Route path="/tokens" element={<TokenListPage />} />
+            <Route path="/disabletoken" element={<TokenDisablePage />} />
             <Route path="/tokenmetrics" element={
               <div className="coming-soon">
                 <h2>Token Metrics</h2>

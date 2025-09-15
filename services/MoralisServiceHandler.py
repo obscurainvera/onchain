@@ -323,8 +323,9 @@ class MoralisServiceHandler:
         return currentLiveCandleTimeStartTime
     
     def getTimeframeSeconds(self, timeframe: str) -> int:
-        """Convert timeframe string to seconds"""
-        return MoralisAPIConstants.TIMEFRAME_SECONDS.get(timeframe, 0)
+        """Convert timeframe string to seconds - delegates to CommonUtil"""
+        from utils.CommonUtil import CommonUtil
+        return CommonUtil.getTimeframeSeconds(timeframe)
     
     def mapToInternalTimefframe(self, moralis_timeframe: str) -> str:
         """Map Moralis timeframe to internal format"""

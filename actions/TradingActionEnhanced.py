@@ -91,7 +91,9 @@ class TradingActionEnhanced:
         )
         
         if not timeframeCreated:
-            self.trading_handler.disableToken(tokenAddress, addedBy, "Failed to create timeframe records")
+            result = self.trading_handler.disableToken(tokenAddress, addedBy, "Failed to create timeframe records")
+            if not result['success']:
+                logger.warning(f"Failed to disable token {tokenAddress} after timeframe creation failure: {result['error']}")
             raise ValueError(ValidationMessages.FAILED_TIMEFRAME_RECORDS)
     
     def persitCandlesFetchedFromAPI(self, tokenAddress: str, pairAddress: str, symbol: str,
@@ -336,7 +338,9 @@ class TradingActionEnhanced:
         """Handle and cleanup token addition errors"""
         logger.error(f"Error in new token addition with timeframes: {error}")
         try:
-            self.trading_handler.disableToken(tokenAddress, addedBy, f"Addition failed: {str(error)}")
-        except:
-            pass
+            result = self.trading_handler.disableToken(tokenAddress, addedBy, f"Addition failed: {str(error)}")
+            if not result['success']:
+                logger.warning(f"Failed to disable token {tokenAddress} after addition failure: {result['error']}")
+        except Exception as e:
+            logger.warning(f"Exception while disabling token {tokenAddress} after addition failure: {e}")
         return {'success': False, 'error': str(error)}

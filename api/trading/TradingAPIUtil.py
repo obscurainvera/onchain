@@ -1,5 +1,6 @@
 from datetime import datetime, timezone, timedelta
 from typing import Dict, Tuple, Optional
+from constants.TradingAPIConstants import TradingAPIConstants
 from logs.logger import get_logger
 from constants.TradingConstants import TimeframeConstants, ValidationMessages
 
@@ -97,12 +98,12 @@ class TradingAPIUtil:
             return False, 'No JSON data provided', {}
 
         # Extract and validate required fields
-        tokenAddress = data.get('tokenAddress', '').strip()
-        pairAddress = data.get('pairAddress', '').strip()
-        ema21Data = data.get('ema21')
-        ema34Data = data.get('ema34')
-        addedBy = data.get('addedBy', 'api_user')
-        timeframes = data.get('timeframes', [])
+        tokenAddress = data.get(TradingAPIConstants.RequestParameters.TOKEN_ADDRESS, '').strip()
+        pairAddress = data.get(TradingAPIConstants.RequestParameters.PAIR_ADDRESS, '').strip()
+        ema21Data = data.get(TradingAPIConstants.Log.EMA_21_TYPE)
+        ema34Data = data.get(TradingAPIConstants.Log.EMA_34_TYPE)
+        addedBy = data.get(TradingAPIConstants.RequestParameters.ADDED_BY, 'api_user')
+        timeframes = data.get(TradingAPIConstants.RequestParameters.TIMEFRAMES, [])
 
         # Validate basic required fields
         if not all([tokenAddress, pairAddress]):
@@ -113,12 +114,12 @@ class TradingAPIUtil:
             return isTimeframeCorrect
 
         return True, '', {
-            'tokenAddress': tokenAddress,
-            'pairAddress': pairAddress,
-            'ema21Data': ema21Data,
-            'ema34Data': ema34Data,
-            'addedBy': addedBy,
-            'timeframes': timeframes
+            TradingAPIConstants.RequestParameters.TOKEN_ADDRESS: tokenAddress,
+            TradingAPIConstants.RequestParameters.PAIR_ADDRESS: pairAddress,
+            TradingAPIConstants.Log.EMA_21_TYPE: ema21Data,
+            TradingAPIConstants.Log.EMA_34_TYPE: ema34Data,
+            TradingAPIConstants.RequestParameters.ADDED_BY: addedBy,
+            TradingAPIConstants.RequestParameters.TIMEFRAMES: timeframes
         }
 
     @staticmethod
@@ -134,10 +135,9 @@ class TradingAPIUtil:
         }
         """
        
+    
         
-        requiredTimeframes = ['30min', '1h', '4h']
-        
-        for timeframe in requiredTimeframes:
+        for timeframe in TradingAPIConstants.Values.REQUIRED_TIMEFRAMES:
             if timeframe not in emaData:
                 return False, f'Missing {timeframe} timeframe data in {emaType}'
             
@@ -163,40 +163,40 @@ class TradingAPIUtil:
         """
     
         # Validate EMA21 data structure
-        isValid, errorMsg = TradingAPIUtil.validatePerTimeframeEMAData(ema21Data, 'ema21')
+        isValid, errorMsg = TradingAPIUtil.validatePerTimeframeEMAData(ema21Data, TradingAPIConstants.Log.EMA_21_TYPE)
         if not isValid:
             return False, errorMsg, None
 
         # Validate EMA34 data structure  
-        isValid, errorMsg = TradingAPIUtil.validatePerTimeframeEMAData(ema34Data, 'ema34')
+        isValid, errorMsg = TradingAPIUtil.validatePerTimeframeEMAData(ema34Data, TradingAPIConstants.Log.EMA_34_TYPE)
         if not isValid:
             return False, errorMsg, None
 
         # Parse and validate reference times for all timeframes - return in per-timeframe format directly
         perTimeframeEMAData = {}
 
-        for timeframe in ['30min', '1h', '4h']:
+        for timeframe in TradingAPIConstants.Values.REQUIRED_TIMEFRAMES:
             # Parse EMA21 reference time
-            ema21TimeStr = ema21Data[timeframe]['referenceTime']
+            ema21TimeStr = ema21Data[timeframe][TradingAPIConstants.RequestParameters.REFERENCE_TIME]    
             success, errorMsg, unixTime = TradingAPIUtil.parseUserFriendlyTime(ema21TimeStr)
             if not success:
                 return False, f'Invalid ema21 referenceTime for {timeframe}: {errorMsg}', None
             
             # Parse EMA34 reference time
-            ema34TimeStr = ema34Data[timeframe]['referenceTime'] 
+            ema34TimeStr = ema34Data[timeframe][TradingAPIConstants.RequestParameters.REFERENCE_TIME] 
             success, errorMsg, unixTime34 = TradingAPIUtil.parseUserFriendlyTime(ema34TimeStr)
             if not success:
                 return False, f'Invalid ema34 referenceTime for {timeframe}: {errorMsg}', None
             
             # Build per-timeframe format directly
             perTimeframeEMAData[timeframe] = {
-                'ema21': {
-                    'value': ema21Data[timeframe]['value'],
-                    'referenceTime': unixTime
+                TradingAPIConstants.Log.EMA_21_TYPE: {
+                    TradingAPIConstants.RequestParameters.VALUE: ema21Data[timeframe][TradingAPIConstants.RequestParameters.VALUE],
+                    TradingAPIConstants.RequestParameters.REFERENCE_TIME: unixTime
                 },
-                'ema34': {
-                    'value': ema34Data[timeframe]['value'],
-                    'referenceTime': unixTime34
+                TradingAPIConstants.Log.EMA_34_TYPE: {
+                    TradingAPIConstants.RequestParameters.VALUE: ema34Data[timeframe][TradingAPIConstants.RequestParameters.VALUE],
+                    TradingAPIConstants.RequestParameters.REFERENCE_TIME: unixTime34
                 }
             }
 

@@ -9,6 +9,11 @@ from typing import List, Dict, Any
 from decimal import Decimal
 from datetime import datetime
 import logging
+from utils import IndicatorConstants
+from utils.CommonUtil import CommonUtil
+from constants.TradingHandlerConstants import TradingHandlerConstants
+from utils.IndicatorConstants import IndicatorConstants
+
 
 logger = logging.getLogger(__name__)
 
@@ -32,13 +37,8 @@ class TradingActionUtil:
     
     @staticmethod
     def getTimeframeSeconds(timeframe: str) -> int:
-        """Convert timeframe string to seconds"""
-        timeframe_map = {
-            '15m': 900,
-            '1h': 3600,
-            '4h': 14400
-        }
-        return timeframe_map.get(timeframe, 900)
+        """Convert timeframe string to seconds - delegates to CommonUtil"""
+        return CommonUtil.getTimeframeSeconds(timeframe)
     
     @staticmethod
     def calculateNextCandleFetch(timeframe: str, latestCandleTime: int) -> int:
@@ -50,125 +50,7 @@ class TradingActionUtil:
     # DATA AGGREGATION UTILITIES
     # ===============================================================
     
-    @staticmethod
-    def aggregateToHourlyInMemory(all15MinCandles: List[Dict]) -> Dict:
-        """
-        Aggregate 15min candles to hourly in memory - returns candles and latest time
-        
-        Args:
-            candles_15m: List of 15-minute candles with keys: unixtime, openprice, highprice, lowprice, closeprice, volume
-            
-        Returns:
-            Dict with keys: 'candles' (List[Dict]), 'latest_time' (int)
-        """
-        # Group candles by hour periods
-        hourGroups = {}
-        for candle in all15MinCandles:
-            # Calculate the hour bucket by truncating to the nearest hour (e.g., 1609459200 for 2021-01-01 00:00:00)
-            hourBucket = (candle['unixtime'] // 3600) * 3600
-            if hourBucket not in hourGroups:
-                hourGroups[hourBucket] = []
-            hourGroups[hourBucket].append(candle)
-        
-        # Process each hour group
-        hourlyCandles = []
-        latestTime = None
-        
-        for hourStart, candles in hourGroups.items():
-            if len(candles) == 4:  # Must have exactly 4 candles
-                # Verify they are the right times (:00, :15, :30, :45)
-                expectedMinutes = [0, 15, 30, 45]
-                actualMinutes = [datetime.fromtimestamp(c['unixtime']).minute for c in candles]
-                actualMinutes.sort()
-                
-                if actualMinutes == expectedMinutes:
-                    # OPTIMIZED: No sorting needed - find candles by minute directly
-                    openCandle = next(c for c in candles if datetime.fromtimestamp(c['unixtime']).minute == 0)
-                    closeCandle = next(c for c in candles if datetime.fromtimestamp(c['unixtime']).minute == 45)
-                    
-                    hourlyCandle = {
-                        'unixtime': hourStart,
-                        'openprice': openCandle['openprice'],
-                        'closeprice': closeCandle['closeprice'],
-                        'highprice': max(c['highprice'] for c in candles),
-                        'lowprice': min(c['lowprice'] for c in candles),
-                        'volume': sum(c['volume'] for c in candles)
-                    }
-                    
-                    hourlyCandles.append(hourlyCandle)
-                    
-                    # Track latest time during aggregation
-                    if latestTime is None or hourStart > latestTime:
-                        latestTime = hourStart
-        
-        return {
-            'candles': hourlyCandles,
-            'latest_time': latestTime,
-            'next_fetch_time': latestTime + 3600 if latestTime else None  # 1 hour = 3600 seconds
-        }
-    
-    @staticmethod
-    def aggregateToFourHourlyInMemory(all1HrCandles: List[Dict]) -> Dict:
-        """
-        Aggregate 1h candles to 4-hourly in memory - returns candles and latest time
-        
-        Args:
-            candles_1h: List of 1-hour candles with keys: unixtime, openprice, highprice, lowprice, closeprice, volume
-            
-        Returns:
-            Dict with keys: 'candles' (List[Dict]), 'latest_time' (int)
-        """
-        # Group candles by 4-hour periods (00:00, 04:00, 08:00, 12:00, 16:00, 20:00)
-        fourHourGroups = {}
-        for candle in all1HrCandles:
-            # Calculate 4-hour bucket (aligned to 00:00, 04:00, 08:00, etc.)
-            fourHourBucket = (candle['unixtime'] // 14400) * 14400
-            if fourHourBucket not in fourHourGroups:
-                fourHourGroups[fourHourBucket] = []
-            fourHourGroups[fourHourBucket].append(candle)
-        
-        # Process each 4-hour group
-        fourHourlyCandles = []
-        latestTime = None
-        
-        for fourHourStart, candles in fourHourGroups.items():
-            if len(candles) == 4:  # Must have exactly 4 hourly candles
-                # Verify they are the right times (00, 01, 02, 03 or 04, 05, 06, 07, etc.)
-                expectedHoursCandle = [(fourHourStart // 3600 + i) % 24 for i in range(4)]
-                actualHoursCandle = [datetime.fromtimestamp(c['unixtime']).hour for c in candles]
-                actualHoursCandle.sort()
-                expectedHoursCandle.sort()
-                
-                if actualHoursCandle == expectedHoursCandle:
-                    # OPTIMIZED: No sorting needed - find candles by hour directly
-                    openCandle = next(c for c in candles if datetime.fromtimestamp(c['unixtime']).hour == actualHoursCandle[0])
-                    clodeCandle = next(c for c in candles if datetime.fromtimestamp(c['unixtime']).hour == actualHoursCandle[-1])
-                    
-                    fourHourlyCandle = {
-                        'unixtime': fourHourStart,
-                        'openprice': openCandle['openprice'],
-                        'closeprice': clodeCandle['closeprice'],
-                        'highprice': max(c['highprice'] for c in candles),
-                        'lowprice': min(c['lowprice'] for c in candles),
-                        'volume': sum(c['volume'] for c in candles)
-                    }
-                    
-                    fourHourlyCandles.append(fourHourlyCandle)
-                    
-                    # Track latest time during aggregation
-                    if latestTime is None or fourHourStart > latestTime:
-                        latestTime = fourHourStart
-        
-        return {
-            'candles': fourHourlyCandles,
-            'latest_time': latestTime,
-            'next_fetch_time': latestTime + 14400 if latestTime else None  # 4 hours = 14400 seconds
-        }
-    
-    # ===============================================================
-    # VWAP CALCULATION UTILITIES
-    # ===============================================================
-    
+   
     @staticmethod
     def calculateVWAPForSpecificTimeframe(candles: List[Dict]) -> Dict:
         """
@@ -327,8 +209,8 @@ class TradingActionUtil:
         Returns:
             List of candles from today only
         """
-        day_end = day_start + 86400  # 24 hours later
-        return [c for c in candles if day_start <= c['unixtime'] < day_end]
+        _, day_end = CommonUtil.getSessionStartAndEndUnix(day_start)
+        return [c for c in candles if day_start <= c[TradingHandlerConstants.OHLCVDetails.UNIX_TIME] <= day_end]
     
     # ===============================================================
     # EMA STATE UTILITIES
@@ -358,16 +240,16 @@ class TradingActionUtil:
         nextFetchTime = referenceUnixTime + timeframeInSeconds
         
         return {
-            'tokenAddress': tokenAddress,
-            'pairAddress': pairAddress,
-            'timeframe': timeframe,
-            'emaKey': str(ema_period),
-            'pairCreatedTime': pairCreatedTime,
-            'emaAvailableTime': referenceUnixTime,
-            'emaValue': ema_value,
-            'status': status,
-            'lastUpdatedUnix': referenceUnixTime,
-            'nextFetchTime': nextFetchTime
+            TradingHandlerConstants.EMAStates.TOKEN_ADDRESS  : tokenAddress,
+            TradingHandlerConstants.EMAStates.PAIR_ADDRESS: pairAddress,
+            TradingHandlerConstants.EMAStates.TIMEFRAME: timeframe,
+            TradingHandlerConstants.EMAStates.EMA_KEY: str(ema_period),
+            TradingHandlerConstants.EMAStates.PAIR_CREATED_TIME: pairCreatedTime,
+            TradingHandlerConstants.EMAStates.EMA_AVAILABLE_TIME: referenceUnixTime,
+            TradingHandlerConstants.EMAStates.EMA_VALUE: ema_value,
+            TradingHandlerConstants.EMAStates.STATUS: status,
+            TradingHandlerConstants.EMAStates.LAST_UPDATED_UNIX: referenceUnixTime,
+            TradingHandlerConstants.EMAStates.NEXT_FETCH_TIME: nextFetchTime
         }
     
     @staticmethod
@@ -387,9 +269,9 @@ class TradingActionUtil:
             Dict formatted for candle update operations
         """
         return {
-            'tokenAddress': tokenAddress,
-            'timeframe': timeframe,
-            'ema_period': ema_period,
-            'unixtime': unixtime,
-            'ema_value': ema_value
+            TradingHandlerConstants.OHLCVDetails.TOKEN_ADDRESS: tokenAddress,
+            TradingHandlerConstants.OHLCVDetails.TIMEFRAME: timeframe,
+            IndicatorConstants.EMAStates.EMA_PERIOD: ema_period,
+            TradingHandlerConstants.OHLCVDetails.UNIX_TIME: unixtime,
+            IndicatorConstants.EMAStates.EMA_VALUE: ema_value
         }

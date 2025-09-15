@@ -59,11 +59,15 @@ BENEFITS:
 
 from typing import Dict, List, Any, Optional, Tuple
 from decimal import Decimal
+from constants.TradingAPIConstants import TradingAPIConstants
 from logs.logger import get_logger
 from database.trading.TradingHandler import TradingHandler, EMAStatus
 from scheduler.SchedulerConstants import Timeframes
 from actions.TradingActionUtil import TradingActionUtil
-from constants.EMAConstants import *
+from utils.CommonUtil import CommonUtil
+from constants.TradingHandlerConstants import TradingHandlerConstants
+
+from utils.IndicatorConstants import IndicatorConstants
 
 logger = get_logger(__name__)
 
@@ -81,7 +85,7 @@ class EMAProcessor:
     def __init__(self, trading_handler: TradingHandler):
         self.trading_handler = trading_handler
         self.EMA_PERIODS = [21, 34]
-        self.TIMEFRAMES = [Timeframes.FIFTEEN_MIN, Timeframes.ONE_HOUR, Timeframes.FOUR_HOUR]
+        
     
 
     def processEMAForScheduler(self) -> bool:
@@ -124,7 +128,7 @@ class EMAProcessor:
         except Exception as e:
             logger.error(f"Error in NEW EMA scheduler processing: {e}", exc_info=True)
             return False
-
+    
     def getAllEMAStateAndCandleData(self) -> Dict[str, Dict]:
         """
         SINGLE OPTIMIZED QUERY: Get all EMA data with corresponding candles in one batch
@@ -155,9 +159,7 @@ class EMAProcessor:
         """
         try:
             # Get all EMA data with candles in single optimized query
-            emaDataWithCandles = self.trading_handler.getAllEMADataWithCandlesForScheduler(
-                self.TIMEFRAMES, self.EMA_PERIODS
-            )
+            emaDataWithCandles = self.trading_handler.getAllEMADataWithCandlesForScheduler()
             
             logger.info(f"Retrieved EMA data for {len(emaDataWithCandles)} tokens")
             return emaDataWithCandles
@@ -172,7 +174,7 @@ class EMAProcessor:
         
         Args:
             emaDataWithCandles: Organized EMA data with candles from _getAllEMADataWithCandles
-            
+        
         Returns:
             Tuple[List, List]: (ema_candle_updates, ema_state_updates)
         """
@@ -197,12 +199,12 @@ class EMAProcessor:
                             continue
                         
                         # Extract data
-                        emaValue = timeframeData.get('ema_value')
-                        lastUpdatedAt = timeframeData.get('last_updated_at', 0)
-                        status = timeframeData.get('status')
-                        emaAvailableAt = timeframeData.get('ema_available_at', 0)
-                        lastFetchedAt = timeframeData.get('last_fetched_at', 0)
-                        candles = timeframeData.get('candles', [])
+                        emaValue = timeframeData.get(TradingHandlerConstants.EMAStates.EMA_VALUE)
+                        lastUpdatedAt = timeframeData.get(TradingHandlerConstants.EMAStates.LAST_UPDATED_UNIX, 0)
+                        status = timeframeData.get(TradingHandlerConstants.EMAStates.STATUS)
+                        emaAvailableAt = timeframeData.get(TradingHandlerConstants.EMAStates.EMA_AVAILABLE_TIME, 0)
+                        lastFetchedAt = timeframeData.get(TradingHandlerConstants.TimeframeMetadata.LAST_FETCHED_AT, 0)
+                        candles = timeframeData.get(IndicatorConstants.EMAStates.CANDLES, [])
                         
                         if not candles:
                             continue
@@ -236,7 +238,7 @@ class EMAProcessor:
             
             logger.info(f"Processed EMA calculations: {len(emaCandlesUpdatedData)} candle updates, {len(emaStateUpdatedData)} state updates")
             return emaCandlesUpdatedData, emaStateUpdatedData
-            
+        
         except Exception as e:
             logger.error(f"Error processing EMA calculations: {e}")
             return [], []
@@ -270,7 +272,7 @@ class EMAProcessor:
         """
         try:
             # Filter candles to only include those from emaAvailableAt onwards
-            filteredCandles = [c for c in candles if c['unixtime'] >= emaAvailableAt]
+            filteredCandles = [c for c in candles if c[IndicatorConstants.EMAStates.CANDLE_UNIX_TIME] >= emaAvailableAt]
             
             if len(filteredCandles) < emaPeriod:
                 logger.warning(f"Not enough candles for first EMA{emaPeriod} calculation: {tokenAddress} {timeframe}")
@@ -286,7 +288,7 @@ class EMAProcessor:
         except Exception as e:
             logger.error(f"Error in first EMA calculation from data: {e}")
             return None, None
-
+    
     def performIncrementalEMAUpdate(self, tokenAddress: str, pairAddress: str, timeframe: str,
                                            emaPeriod: int, candles: List[Dict], currentEMA: float, lastUpdatedAt: int) -> Tuple[Optional[List], Optional[Dict]]:
         """
@@ -294,7 +296,7 @@ class EMAProcessor:
         """
         try:
             # Filter candles to only include new ones after lastUpdatedAt
-            newCandles = [c for c in candles if c['unixtime'] > lastUpdatedAt]
+            newCandles = [c for c in candles if c[IndicatorConstants.EMAStates.CANDLE_UNIX_TIME] > lastUpdatedAt]
             
             if not newCandles:
                 logger.debug(f"No new candles for incremental EMA update: {tokenAddress} {timeframe}")
@@ -305,26 +307,26 @@ class EMAProcessor:
             currentEMAValue = currentEMA
             
             for candle in newCandles:
-                currentEMAValue = self.calculateEMAValue(currentEMAValue, candle['closeprice'], emaPeriod)
-                latestUNIX = candle['unixtime']
+                currentEMAValue = self.calculateEMAValue(currentEMAValue, candle[IndicatorConstants.EMAStates.CANDLE_CLOSE_PRICE], emaPeriod)
+                latestUNIX = candle[IndicatorConstants.EMAStates.CANDLE_UNIX_TIME]
                 
                 # Add update record for this candle
                 emaCandleData.append({
-                    TOKEN_ADDRESS: tokenAddress,
-                    TIMEFRAME: timeframe,
-                    EMA_PERIOD: emaPeriod,
-                    CANDLE_UNIX: candle['unixtime'],
-                    EMA_VALUE: currentEMAValue
+                    TradingHandlerConstants.OHLCVDetails.TOKEN_ADDRESS: tokenAddress,
+                    TradingHandlerConstants.OHLCVDetails.TIMEFRAME: timeframe,
+                    IndicatorConstants.EMAStates.EMA_PERIOD: emaPeriod,
+                    TradingHandlerConstants.OHLCVDetails.UNIX_TIME: candle[IndicatorConstants.EMAStates.CANDLE_UNIX_TIME],
+                    IndicatorConstants.EMAStates.EMA_VALUE: currentEMAValue
                 })
             
             # Create state update
             emaStateData = {
-                TOKEN_ADDRESS: tokenAddress,
-                TIMEFRAME: timeframe,
-                EMA_PERIOD: emaPeriod,
-                EMA_VALUE: currentEMAValue,
-                LAST_UPDATED_UNIX: latestUNIX,
-                STATUS: AVAILABLE
+                TradingHandlerConstants.EMAStates.TOKEN_ADDRESS: tokenAddress,
+                TradingHandlerConstants.EMAStates.TIMEFRAME: timeframe,
+                IndicatorConstants.EMAStates.EMA_PERIOD: emaPeriod,
+                IndicatorConstants.EMAStates.EMA_VALUE: currentEMAValue,
+                TradingHandlerConstants.EMAStates.LAST_UPDATED_UNIX: latestUNIX,
+                TradingHandlerConstants.EMAStates.STATUS: EMAStatus.AVAILABLE
             }
             
             return emaCandleData, emaStateData
@@ -332,23 +334,7 @@ class EMAProcessor:
         except Exception as e:
             logger.error(f"Error in incremental EMA update from data: {e}")
             return None, None
-    
-    def fetchEMAStateAndLastFetchedAtTimes(self, successfulTokensList: List[Dict[str, Any]]) -> Tuple[Dict, Dict]:
-        """
-        STEP 1: Fetch all metadata in 2 batch queries
-        
-        Returns:
-            Tuple[Dict, Dict]: (ema_states, fetch_times)
-        """
-        tokenAddresses = [token['tokenaddress'] for token in successfulTokensList]
-        
-        allEMAState = self.trading_handler.getAllEMAStateInfo(tokenAddresses, self.TIMEFRAMES, self.EMA_PERIODS)
-        allLastFetchedAtTimes = self.trading_handler.getAllLastFetchTimes(tokenAddresses, self.TIMEFRAMES)
-        
-        return allEMAState, allLastFetchedAtTimes
-    
-   
-    
+     
    
     def recordCalculatedEMAForAllRetrievedTokens(self, emaCandlesUpdatedData: List, emaStateUpdatedData: List) -> bool:
         """
@@ -359,11 +345,7 @@ class EMAProcessor:
         """
         return self.trading_handler.batchUpdateEMAData(emaCandlesUpdatedData, emaStateUpdatedData)
     
-    
-   
-    
-    
-    
+
     def calculateEMAValue(self, previousEMA: float, currentPrice, period: int) -> float:
         """
         Calculate single EMA value using standard EMA formula
@@ -374,36 +356,11 @@ class EMAProcessor:
         multiplier = 2.0 / (period + 1)
         return (currentPriceFloat - previousEMA) * multiplier + previousEMA
     
-    def calculateInitialStartTime(self, pairCreatedTime: int, timeframe: str) -> int:
+    def calculateInitialCandleStartTime(self, pairCreatedTime: int, timeframe: str) -> int:
         """
-        Calculate the initial candle start time based on pair created time and timeframe.
-        
-        Example:
-        - pairCreatedTime = 2:30 Sept 7 2025 (1757212200)
-        - timeframe = '1h'
-        - Returns: 2:00 Sept 7 2025 (1757210400) - the start of the 1h candle containing 2:30
-        
-        Args:
-            pairCreatedTime: Unix timestamp when the pair was created
-            timeframe: Timeframe string ('15m', '1h', '4h')
-            
-        Returns:
-            int: Unix timestamp of the initial candle start time
+        Calculate the initial candle start time - delegates to CommonUtil
         """
-        timeframeInSeconds = TradingActionUtil.getTimeframeSeconds(timeframe)
-        
-        if timeframe == '1h':
-            # For 1h: round down to the nearest hour
-            return (pairCreatedTime // 3600) * 3600
-        elif timeframe == '4h':
-            # For 4h: round down to the nearest 4-hour boundary
-            return (pairCreatedTime // 14400) * 14400
-        elif timeframe == '15m':
-            # For 15m: round down to the nearest 15-minute boundary
-            return (pairCreatedTime // 900) * 900
-        else:
-            # Default: return the pair created time itself
-            return pairCreatedTime
+        return CommonUtil.calculateInitialStartTime(pairCreatedTime, timeframe)
     
     def calcualteEMAForNewTokenFromAPI(self, tokenAddress: str, pairAddress: str, pairCreatedTime: int,
                                       allCandles: Dict[str, List[Dict]]) -> Dict:
@@ -429,28 +386,28 @@ class EMAProcessor:
                 if not candles:
                     continue
                     
-                latestFetchedAtTime = max(candle['unixtime'] for candle in candles)
+                latestFetchedAtTime = max(candle[TradingHandlerConstants.OHLCVDetails.UNIX_TIME] for candle in candles)
                 
-                for emaPeriod in [21, 34]:
-                    # Calculate when EMA becomes available: initial candle start time + (emaPeriod * timeframe_seconds)
-                    timeframeInSeconds = TradingActionUtil.getTimeframeSeconds(timeframe)
-                    initialCandleStartTime = self.calculateInitialStartTime(pairCreatedTime, timeframe)
+                for emaPeriod in [IndicatorConstants.EMAStates.EMA_21, IndicatorConstants.EMAStates.EMA_34]:    
+                    # there is a problem, the current ema available time calculation works as next fetch time, paircreatedtime = 1757701876(12 September 2025 18:31:16), timeframe = 1h, ema =21, calculated value =1757775600(13 September 2025 15:00:00) - but initial ema 21 is calculated for the candle 13 September 2025 14:00:00 - but we here store the unix when that candle becomes available but we use this unix directly with the lastfetchedat time to check if we have enough data to calculate EMA - so ema calculation will have one candle delay
+                    timeframeInSeconds = CommonUtil.getTimeframeSeconds(timeframe)
+                    initialCandleStartTime = self.calculateInitialCandleStartTime(pairCreatedTime, timeframe)
                     emaAvailableTime = initialCandleStartTime + (emaPeriod * timeframeInSeconds)
                     
                     logger.info(f"Processing EMA{emaPeriod} state for {tokenAddress} {timeframe}: available at {emaAvailableTime}, latest fetched: {latestFetchedAtTime}")
                     
                     # Prepare EMA state data for batch operation
                     currentEMAStateData = {
-                        'tokenAddress': tokenAddress,
-                        'pairAddress': pairAddress,
-                        'timeframe': timeframe,
-                        'emaKey': str(emaPeriod),
-                        'pairCreatedTime': pairCreatedTime,
-                        'emaAvailableTime': emaAvailableTime,
-                        'emaValue': None,
-                        'status': EMAStatus.NOT_AVAILABLE,
-                        'lastUpdatedUnix': None,
-                        'nextFetchTime': None
+                        TradingHandlerConstants.EMAStates.TOKEN_ADDRESS: tokenAddress,
+                        TradingHandlerConstants.EMAStates.PAIR_ADDRESS: pairAddress,
+                        TradingHandlerConstants.EMAStates.TIMEFRAME: timeframe,
+                        TradingHandlerConstants.EMAStates.EMA_KEY: str(emaPeriod),
+                        TradingHandlerConstants.EMAStates.PAIR_CREATED_TIME: pairCreatedTime,
+                        TradingHandlerConstants.EMAStates.EMA_AVAILABLE_TIME: emaAvailableTime,
+                        TradingHandlerConstants.EMAStates.EMA_VALUE: None,
+                        TradingHandlerConstants.EMAStates.STATUS: EMAStatus.NOT_AVAILABLE,
+                        TradingHandlerConstants.EMAStates.LAST_UPDATED_UNIX: None,
+                        TradingHandlerConstants.EMAStates.NEXT_FETCH_TIME: None
                     }
                     
                     # FIXED: Check if we have enough data to calculate EMA using latest_fetched_time instead of current_time
@@ -465,27 +422,27 @@ class EMAProcessor:
 
                         if emaCandleUpdatedData and emaStateUpdatedData:
                             # Calculate next fetch time
-                            nextFetchTime = emaStateUpdatedData['last_updated_unix'] + timeframeInSeconds
+                            nextFetchTime = emaStateUpdatedData[TradingHandlerConstants.EMAStates.LAST_UPDATED_UNIX] + timeframeInSeconds
 
                             # Update EMA state data with calculated values
                             currentEMAStateData.update({
-                                'emaValue': emaStateUpdatedData['ema_value'],
-                                'status': EMAStatus.AVAILABLE,
-                                'lastUpdatedUnix': emaStateUpdatedData['last_updated_unix'],
-                                'nextFetchTime': nextFetchTime
+                                TradingHandlerConstants.EMAStates.EMA_VALUE: emaStateUpdatedData[TradingHandlerConstants.EMAStates.EMA_VALUE],
+                                TradingHandlerConstants.EMAStates.STATUS: EMAStatus.AVAILABLE,
+                                TradingHandlerConstants.EMAStates.LAST_UPDATED_UNIX: emaStateUpdatedData[TradingHandlerConstants.EMAStates.LAST_UPDATED_UNIX],
+                                TradingHandlerConstants.EMAStates.NEXT_FETCH_TIME: nextFetchTime
                             })
                             
                             # Collect EMA candle updates for batch operation
                             for candle in emaCandleUpdatedData:
                                 batchEMACandleUpdatedData.append({
-                                    'tokenAddress': tokenAddress,
-                                    'timeframe': timeframe,
-                                    'ema_period': emaPeriod,
-                                    'unixtime': candle['unixtime'],
-                                    'ema_value': candle['ema_value']
+                                    TradingHandlerConstants.OHLCVDetails.TOKEN_ADDRESS: tokenAddress,
+                                    TradingHandlerConstants.OHLCVDetails.TIMEFRAME: timeframe,
+                                    IndicatorConstants.EMAStates.EMA_PERIOD: emaPeriod, 
+                                    TradingHandlerConstants.OHLCVDetails.UNIX_TIME: candle[TradingHandlerConstants.OHLCVDetails.UNIX_TIME],
+                                    IndicatorConstants.EMAStates.EMA_VALUE: candle[IndicatorConstants.EMAStates.EMA_VALUE]
                                 })
 
-                            logger.info(f"EMA{emaPeriod} calculated for {tokenAddress} {timeframe}: final value {emaStateUpdatedData['ema_value']}")
+                            logger.info(f"EMA{emaPeriod} calculated for {tokenAddress} {timeframe}: final value {emaStateUpdatedData[IndicatorConstants.EMAStates.EMA_VALUE]}")
                         else:
                             logger.warning(f"Failed to calculate EMA{emaPeriod} for {tokenAddress} {timeframe}: calculation returned None")
                     else:
@@ -540,22 +497,22 @@ class EMAProcessor:
                 elif i == emaPeriod - 1:
                     # emaPeriod-th candle: Calculate SMA as initial EMA value
                     # For EMA21: 21st candle (index 20) gets SMA of first 21 candles
-                    sma = sum(float(candles[j]['closeprice']) for j in range(i + 1)) / (i + 1)
+                    sma = sum(float(candles[j][TradingHandlerConstants.OHLCVDetails.CLOSE_PRICE]) for j in range(i + 1)) / (i + 1)
                     currentEMA = sma
                 else:
                     # Subsequent candles: Calculate EMA using previous EMA value
                     # For EMA21: 22nd+ candles use standard EMA formula
-                    currentEMA = self.calculateEMAValue(currentEMA, candle['closeprice'], emaPeriod)
+                    currentEMA = self.calculateEMAValue(currentEMA, candle[TradingHandlerConstants.OHLCVDetails.CLOSE_PRICE], emaPeriod)
 
-                latestUNIX = candle['unixtime']
+                latestUNIX = candle[TradingHandlerConstants.OHLCVDetails.UNIX_TIME]
 
                 # Add update record for this candle (starting from emaPeriod-th candle)
                 emaCandleUpdatedData.append({
-                    TOKEN_ADDRESS: token_address,
-                    TIMEFRAME: timeframe,
-                    EMA_PERIOD: emaPeriod,
-                    CANDLE_UNIX: candle['unixtime'],
-                    EMA_VALUE: currentEMA
+                    TradingHandlerConstants.OHLCVDetails.TOKEN_ADDRESS: token_address,
+                    TradingHandlerConstants.OHLCVDetails.TIMEFRAME: timeframe,
+                    IndicatorConstants.EMAStates.EMA_PERIOD: emaPeriod,
+                    TradingHandlerConstants.OHLCVDetails.UNIX_TIME: candle[TradingHandlerConstants.OHLCVDetails.UNIX_TIME],
+                    IndicatorConstants.EMAStates.EMA_VALUE: currentEMA
                 })
 
             if not emaCandleUpdatedData:
@@ -564,12 +521,12 @@ class EMAProcessor:
 
             # Create state update
             emaStateUpdatedData = {
-                TOKEN_ADDRESS: token_address,
-                TIMEFRAME: timeframe,
-                EMA_PERIOD: emaPeriod,
-                EMA_VALUE: currentEMA,
-                LAST_UPDATED_UNIX: latestUNIX,
-                STATUS: AVAILABLE
+                TradingHandlerConstants.EMAStates.TOKEN_ADDRESS: token_address,
+                TradingHandlerConstants.EMAStates.TIMEFRAME: timeframe,
+                IndicatorConstants.EMAStates.EMA_PERIOD: emaPeriod,
+                IndicatorConstants.EMAStates.EMA_VALUE: currentEMA,
+                TradingHandlerConstants.EMAStates.LAST_UPDATED_UNIX: latestUNIX,
+                TradingHandlerConstants.EMAStates.STATUS: EMAStatus.AVAILABLE
             }
 
             return emaCandleUpdatedData, emaStateUpdatedData
@@ -601,7 +558,6 @@ class EMAProcessor:
             Dict with success status
         """
         try:
-            
             logger.info(f"Processing per-timeframe EMA for old token {tokenAddress}")
             
             # Collections for batch operations
@@ -620,7 +576,7 @@ class EMAProcessor:
                 logger.info(f"Processing timeframe {timeframe} with {len(candles)} candles")
                 
                 # Process both EMA21 and EMA34 for this timeframe
-                for emaPeriod in [21, 34]:
+                for emaPeriod in [IndicatorConstants.EMAStates.EMA_21, IndicatorConstants.EMAStates.EMA_34]:
                     emaKey = f"ema{emaPeriod}" # example: "ema21"
                     
                     if emaKey not in timeframeEMAData:
@@ -628,14 +584,10 @@ class EMAProcessor:
                         continue
                     
                     emaInfo = timeframeEMAData[emaKey] # example: {"ema21": {"value": 1.23, "referenceTime": 1234567890}}
-                    emaValue = Decimal(str(emaInfo["value"])) # example: 1.23
-                    emaTime = emaInfo["referenceTime"] # example: 1234567890
+                    emaValue = Decimal(str(emaInfo[TradingAPIConstants.RequestParameters.VALUE])) # example: 1.23
+                    emaTime = emaInfo[TradingAPIConstants.RequestParameters.REFERENCE_TIME] # example: 1234567890
                     
                     logger.info(f"Setting EMA{emaPeriod} for {tokenAddress} {timeframe}: value={emaValue} at timestamp {emaTime}")
-                    
-                    # Calculate timing for next EMA fetch
-                    timeframeInSeconds = TradingActionUtil.getTimeframeSeconds(timeframe)
-                    next_fetch_time = emaTime + timeframeInSeconds
                     
                     # Prepare EMA state record
                     emaStateData = TradingActionUtil.collectDataForEMAStateQueryFromAPI(
@@ -645,7 +597,7 @@ class EMAProcessor:
                     emaStateUpdatedData.append(emaStateData)
                     
                     # Find the reference candle and prepare candle update
-                    userEnteredEMACandle = next((c for c in candles if c['unixtime'] == emaTime), None)
+                    userEnteredEMACandle = next((c for c in candles if c[TradingHandlerConstants.OHLCVDetails.UNIX_TIME] == emaTime), None)
                     if userEnteredEMACandle:
                         emaCandleUpdate = TradingActionUtil.collectDataForEMACandleUpdateQueryFromAPI(
                             tokenAddress, timeframe, emaPeriod, emaTime, emaValue

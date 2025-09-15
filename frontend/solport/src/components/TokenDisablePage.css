@@ -1,0 +1,645 @@
+/* Token Disable Page Styles - Classic 60's Black & White Design */
+.token-disable-container {
+    position: relative;
+    padding: 60px 0;
+    min-height: 100vh;
+    background-color: #000;
+    color: #fff;
+    overflow: hidden;
+    z-index: 1;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+  }
+  
+  /* Subtle background pattern inspired by 60's design */
+  .token-disable-container::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: 
+      radial-gradient(circle at 20% 80%, rgba(255, 255, 255, 0.02) 0%, rgba(0, 0, 0, 0) 50%),
+      radial-gradient(circle at 80% 20%, rgba(255, 255, 255, 0.02) 0%, rgba(0, 0, 0, 0) 50%),
+      linear-gradient(180deg, rgba(0, 0, 0, 1) 0%, rgba(20, 20, 20, 1) 100%);
+    z-index: -1;
+    pointer-events: none;
+  }
+  
+  /* Header Section */
+  .token-disable-header {
+    text-align: center;
+    margin-bottom: 60px;
+  }
+  
+  .token-disable-title h1 {
+    font-size: 56px;
+    font-weight: 300;
+    margin: 0 0 20px 0;
+    letter-spacing: -0.02em;
+    background: linear-gradient(135deg, #ffffff 0%, rgba(255, 255, 255, 0.7) 100%);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+    line-height: 1.1;
+  }
+  
+  .token-disable-subtitle {
+    font-size: 18px;
+    color: rgba(255, 255, 255, 0.6);
+    font-weight: 300;
+    margin: 0;
+    letter-spacing: 0.02em;
+  }
+  
+  /* Form Styles */
+  .token-disable-form {
+    max-width: 1400px;
+    margin: 0 auto;
+    padding: 0 20px;
+  }
+  
+  .form-section {
+    background-color: rgba(255, 255, 255, 0.02);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 2px;
+    padding: 40px;
+    margin-bottom: 30px;
+    box-shadow: 0 2px 20px rgba(0, 0, 0, 0.3);
+    -webkit-backdrop-filter: blur(20px);
+    backdrop-filter: blur(20px);
+  }
+  
+  .form-section h2 {
+    color: rgba(255, 255, 255, 0.9);
+    font-size: 24px;
+    font-weight: 300;
+    margin-bottom: 30px;
+    letter-spacing: -0.01em;
+    text-transform: none;
+  }
+  
+  .form-section h3 {
+    color: rgba(255, 255, 255, 0.8);
+    font-size: 18px;
+    font-weight: 400;
+    margin-bottom: 20px;
+    letter-spacing: 0.02em;
+    text-transform: uppercase;
+  }
+  
+  /* Input Styling - Classic clean look */
+  .token-disable-input {
+    width: 100%;
+    height: 56px !important;
+    background-color: rgba(255, 255, 255, 0.05) !important;
+    border: 1px solid rgba(255, 255, 255, 0.2) !important;
+    border-radius: 2px !important;
+    color: rgba(255, 255, 255, 0.9) !important;
+    font-size: 16px !important;
+    padding: 16px 20px !important;
+    transition: all 0.3s ease !important;
+    outline: none !important;
+    box-shadow: none !important;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+  }
+  
+  .token-disable-input:focus {
+    border-color: rgba(255, 255, 255, 0.5) !important;
+    background-color: rgba(255, 255, 255, 0.08) !important;
+    box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.1) !important;
+  }
+  
+  .token-disable-input::placeholder {
+    color: rgba(255, 255, 255, 0.4) !important;
+    font-style: italic;
+  }
+  
+  /* Textarea specific styling */
+  .token-disable-input[as="textarea"] {
+    height: auto !important;
+    min-height: 120px !important;
+    resize: vertical;
+  }
+  
+  /* Form Labels */
+  .form-label {
+    color: rgba(255, 255, 255, 0.9) !important;
+    font-size: 14px !important;
+    font-weight: 400 !important;
+    margin-bottom: 12px !important;
+    letter-spacing: 0.05em !important;
+    text-transform: uppercase !important;
+  }
+  
+  /* Search Loading */
+  .search-loading {
+    display: flex;
+    align-items: center;
+    margin-top: 10px;
+    color: rgba(255, 255, 255, 0.6);
+    font-size: 14px;
+  }
+  
+  /* Active Tokens Section */
+  .active-tokens-section {
+    margin-top: 30px;
+  }
+  
+  .tokens-list-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 20px;
+    flex-wrap: wrap;
+    gap: 15px;
+  }
+  
+  .refresh-tokens-btn {
+    height: 36px !important;
+    background-color: rgba(255, 255, 255, 0.05) !important;
+    border: 1px solid rgba(255, 255, 255, 0.2) !important;
+    border-radius: 2px !important;
+    color: rgba(255, 255, 255, 0.9) !important;
+    font-size: 12px !important;
+    padding: 0 12px !important;
+    transition: all 0.3s ease !important;
+    outline: none !important;
+    display: flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    letter-spacing: 0.02em;
+    text-transform: uppercase;
+  }
+  
+  .refresh-tokens-btn:hover:not(:disabled) {
+    background-color: rgba(255, 255, 255, 0.1) !important;
+    border-color: rgba(255, 255, 255, 0.4) !important;
+    transform: translateY(-1px) !important;
+  }
+  
+  .refresh-tokens-btn:disabled {
+    opacity: 0.6 !important;
+    transform: none !important;
+    cursor: not-allowed !important;
+  }
+  
+  /* Tokens List Table */
+  .tokens-list-container {
+    background-color: #000 !important;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 2px;
+    overflow: hidden;
+    margin-bottom: 15px;
+  }
+  
+  .tokens-list-table {
+    margin-bottom: 0 !important;
+    color: rgba(255, 255, 255, 0.9) !important;
+  }
+  
+  .tokens-list-table thead th {
+    background-color: #000 !important;
+    border: none !important;
+    color: rgba(255, 255, 255, 0.8) !important;
+    font-size: 12px !important;
+    font-weight: 500 !important;
+    letter-spacing: 0.05em !important;
+    text-transform: uppercase !important;
+    padding: 15px 12px !important;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.1) !important;
+  }
+  
+  .tokens-list-table tbody td {
+    background-color: #000 !important;
+    border: none !important;
+    padding: 15px 12px !important;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.05) !important;
+    vertical-align: middle !important;
+    color: rgba(255, 255, 255, 0.9) !important;
+  }
+  
+  .tokens-list-table tbody tr:hover {
+    background-color: rgba(255, 255, 255, 0.02) !important;
+  }
+  
+  .tokens-list-table tbody tr:last-child td {
+    border-bottom: none !important;
+  }
+  
+  /* Token Info in table */
+  .token-info {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+  
+  .token-symbol {
+    color: rgba(255, 255, 255, 0.95);
+    font-size: 14px;
+    font-weight: 600;
+    letter-spacing: 0.02em;
+  }
+  
+  .token-name {
+    color: rgba(255, 255, 255, 0.6);
+    font-size: 12px;
+    font-weight: 400;
+  }
+  
+  /* Token Address */
+  .token-address {
+    color: rgba(255, 255, 255, 0.8);
+    font-size: 12px;
+    font-family: 'Courier New', monospace;
+    cursor: pointer;
+    transition: color 0.2s ease;
+    display: flex;
+    align-items: center;
+    gap: 4px;
+  }
+  
+  .token-address:hover {
+    color: rgba(255, 255, 255, 1);
+  }
+  
+  /* Select Token Button */
+  .select-token-btn {
+    height: 28px !important;
+    background-color: rgba(13, 202, 240, 0.1) !important;
+    border: 1px solid rgba(13, 202, 240, 0.3) !important;
+    border-radius: 2px !important;
+    color: rgba(13, 202, 240, 0.9) !important;
+    font-size: 11px !important;
+    padding: 0 8px !important;
+    transition: all 0.2s ease !important;
+    letter-spacing: 0.02em;
+    text-transform: uppercase;
+  }
+  
+  .select-token-btn:hover {
+    background-color: rgba(13, 202, 240, 0.2) !important;
+    border-color: rgba(13, 202, 240, 0.5) !important;
+    transform: translateY(-1px) !important;
+  }
+  
+  /* Tokens List Footer */
+  .tokens-list-footer {
+    padding: 10px 15px;
+    text-align: center;
+    border-top: 1px solid rgba(255, 255, 255, 0.05);
+  }
+  
+  /* Token Info Card */
+  .token-info-card {
+    background-color: rgba(255, 255, 255, 0.03);
+    border: 1px solid rgba(255, 255, 255, 0.15);
+    border-radius: 2px;
+    padding: 30px;
+    margin-top: 30px;
+    -webkit-backdrop-filter: blur(10px);
+    backdrop-filter: blur(10px);
+  }
+  
+  .token-info-card h3 {
+    color: rgba(255, 255, 255, 0.9);
+    font-size: 16px;
+    font-weight: 400;
+    margin-bottom: 20px;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+  }
+  
+  .token-details {
+    display: flex;
+    flex-direction: column;
+    gap: 15px;
+  }
+  
+  .detail-item {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 12px 0;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  }
+  
+  .detail-item:last-child {
+    border-bottom: none;
+  }
+  
+  .detail-item .label {
+    color: rgba(255, 255, 255, 0.6);
+    font-size: 14px;
+    font-weight: 400;
+    letter-spacing: 0.02em;
+  }
+  
+  .detail-item .value {
+    color: rgba(255, 255, 255, 0.95);
+    font-size: 16px;
+    font-weight: 500;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+  
+  .address-value {
+    cursor: pointer;
+    transition: color 0.2s ease;
+    font-family: 'Courier New', monospace;
+    font-size: 14px;
+  }
+  
+  .address-value:hover {
+    color: rgba(255, 255, 255, 1);
+  }
+  
+  /* Status Badge */
+  .status-badge {
+    font-size: 11px !important;
+    font-weight: 500 !important;
+    padding: 4px 8px !important;
+    border-radius: 2px !important;
+    letter-spacing: 0.02em !important;
+    text-transform: uppercase !important;
+  }
+  
+  
+  /* Submit Section */
+  .submit-section {
+    background-color: rgba(255, 255, 255, 0.02);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 2px;
+    padding: 40px;
+    text-align: center;
+    box-shadow: 0 2px 20px rgba(0, 0, 0, 0.3);
+    -webkit-backdrop-filter: blur(20px);
+    backdrop-filter: blur(20px);
+  }
+  
+  /* Submit Button Styling - Warning approach */
+  .token-disable-submit-btn {
+    height: 60px !important;
+    background-color: rgba(220, 53, 69, 0.9) !important;
+    border: none !important;
+    border-radius: 2px !important;
+    color: #fff !important;
+    font-size: 16px !important;
+    font-weight: 500 !important;
+    padding: 0 40px !important;
+    transition: all 0.3s ease !important;
+    outline: none !important;
+    display: flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    min-width: 280px !important;
+    margin: 0 auto !important;
+    letter-spacing: 0.02em;
+    text-transform: uppercase;
+    box-shadow: 0 4px 15px rgba(220, 53, 69, 0.2) !important;
+  }
+  
+  .token-disable-submit-btn:hover:not(:disabled) {
+    background-color: rgba(220, 53, 69, 1) !important;
+    transform: translateY(-2px) !important;
+    box-shadow: 0 8px 25px rgba(220, 53, 69, 0.3) !important;
+  }
+  
+  .token-disable-submit-btn:active:not(:disabled) {
+    transform: translateY(0) !important;
+    box-shadow: 0 4px 15px rgba(220, 53, 69, 0.2) !important;
+  }
+  
+  .token-disable-submit-btn:disabled {
+    opacity: 0.6 !important;
+    transform: none !important;
+    cursor: not-allowed !important;
+    background-color: rgba(220, 53, 69, 0.5) !important;
+  }
+  
+  /* Error and Success Alerts */
+  .token-disable-error {
+    background-color: rgba(220, 53, 69, 0.1) !important;
+    border: 1px solid rgba(220, 53, 69, 0.3) !important;
+    border-radius: 2px !important;
+    color: #ff8e8e !important;
+    padding: 20px !important;
+    margin-bottom: 30px !important;
+    font-size: 14px;
+    -webkit-backdrop-filter: blur(10px);
+    backdrop-filter: blur(10px);
+  }
+  
+  .token-disable-success {
+    background-color: rgba(25, 135, 84, 0.1) !important;
+    border: 1px solid rgba(25, 135, 84, 0.3) !important;
+    border-radius: 2px !important;
+    color: #8eff8e !important;
+    padding: 20px !important;
+    margin-bottom: 30px !important;
+    font-size: 14px;
+    -webkit-backdrop-filter: blur(10px);
+    backdrop-filter: blur(10px);
+  }
+  
+  .token-disable-error .fas,
+  .token-disable-success .fas {
+    margin-right: 8px;
+  }
+  
+  /* Loading Spinner Styling */
+  .spinner-border {
+    color: rgba(255, 255, 255, 0.8) !important;
+  }
+  
+  /* Responsive Design */
+  @media (max-width: 1200px) {
+    .token-disable-title h1 {
+      font-size: 48px;
+    }
+    
+    .form-section {
+      padding: 30px;
+    }
+    
+    .tokens-list-container {
+      overflow-x: auto;
+    }
+  }
+  
+  @media (max-width: 992px) {
+    .token-disable-container {
+      padding: 40px 0;
+    }
+    
+    .token-disable-header {
+      margin-bottom: 40px;
+    }
+    
+    .token-disable-title h1 {
+      font-size: 42px;
+    }
+    
+    .token-disable-subtitle {
+      font-size: 16px;
+    }
+    
+    .form-section {
+      padding: 25px;
+    }
+    
+    .tokens-list-header {
+      flex-direction: column;
+      align-items: stretch;
+    }
+    
+    .refresh-tokens-btn {
+      align-self: flex-start;
+    }
+  }
+  
+  @media (max-width: 768px) {
+    .token-disable-container {
+      padding: 30px 0;
+    }
+    
+    .token-disable-title h1 {
+      font-size: 36px;
+    }
+    
+    .form-section {
+      padding: 20px;
+      margin-bottom: 20px;
+    }
+    
+    .token-disable-input {
+      height: 48px !important;
+      font-size: 14px !important;
+      padding: 12px 16px !important;
+    }
+    
+    .token-disable-input[as="textarea"] {
+      min-height: 100px !important;
+    }
+    
+    .tokens-list-table thead th,
+    .tokens-list-table tbody td {
+      padding: 12px 8px !important;
+    }
+    
+    .token-symbol {
+      font-size: 12px;
+    }
+    
+    .token-name {
+      font-size: 10px;
+    }
+    
+    .token-address {
+      font-size: 10px;
+    }
+    
+    .select-token-btn {
+      height: 24px !important;
+      font-size: 10px !important;
+      padding: 0 6px !important;
+    }
+    
+    .token-disable-submit-btn {
+      height: 52px !important;
+      font-size: 14px !important;
+      min-width: 240px !important;
+      padding: 0 30px !important;
+    }
+    
+    .warning-section {
+      padding: 20px;
+    }
+    
+    .submit-section {
+      padding: 30px;
+    }
+  }
+  
+  @media (max-width: 576px) {
+    .token-disable-form {
+      padding: 0 15px;
+    }
+    
+    .token-disable-title h1 {
+      font-size: 32px;
+    }
+    
+    .token-disable-subtitle {
+      font-size: 15px;
+    }
+    
+    .form-section {
+      padding: 15px;
+    }
+    
+    .tokens-list-table thead th,
+    .tokens-list-table tbody td {
+      padding: 10px 6px !important;
+      font-size: 11px;
+    }
+    
+    .detail-item {
+      flex-direction: column;
+      align-items: flex-start;
+      gap: 8px;
+    }
+    
+    .detail-item .value {
+      align-self: flex-end;
+    }
+    
+    .token-disable-submit-btn {
+      width: 100% !important;
+      min-width: auto !important;
+    }
+    
+    .warning-section {
+      padding: 15px;
+    }
+    
+    .submit-section {
+      padding: 20px;
+    }
+  }
+  
+  /* Animation for form reveal */
+  @keyframes fadeInUp {
+    from {
+      opacity: 0;
+      transform: translateY(30px);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+  
+  .form-section {
+    animation: fadeInUp 0.6s ease-out;
+  }
+  
+  .token-info-card {
+    animation: fadeInUp 0.4s ease-out;
+  }
+  
+  .warning-section {
+    animation: fadeInUp 0.5s ease-out;
+  }
+  
+  /* Row and Column Adjustments */
+  .form-section .row {
+    margin-left: -10px;
+    margin-right: -10px;
+  }
+  
+  .form-section .row > * {
+    padding-left: 10px;
+    padding-right: 10px;
+  }

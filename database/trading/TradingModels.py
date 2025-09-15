@@ -403,45 +403,4 @@ class SchedulerConfig:
     AGGREGATION_TIMEFRAMES: List[str] = field(default_factory=lambda: ['1h', '4h'])
     MIN_CANDLES_FOR_AGGREGATION: int = 1
 
-# ===============================================================
-# UTILITY FUNCTIONS FOR MODELS
-# ===============================================================
 
-def calculateTimeBucket(unixtime: int, timeframe: str) -> int:
-    """Calculate timebucket for efficient aggregation queries"""
-    if timeframe == "15m":
-        return (unixtime // 900) * 900
-    elif timeframe == "1h":
-        return (unixtime // 3600) * 3600
-    elif timeframe == "4h":
-        return (unixtime // 14400) * 14400
-    else:
-        return unixtime
-
-def getSessionBoundaries(unixtime: int) -> tuple[int, int]:
-    """Get VWAP session start and end (daily sessions at 00:00 UTC)"""
-    session_start = (unixtime // 86400) * 86400  # Start of day
-    session_end = session_start + 86399           # End of day (23:59:59)
-    return session_start, session_end
-
-def shouldTrigger1HourAggregation(unixtime: int) -> bool:
-    """Check if this timestamp should trigger 1-hour aggregation"""
-    from datetime import datetime
-    dt = datetime.fromtimestamp(unixtime)
-    return dt.minute == 45  # Last 15m candle of the hour
-
-def shouldTrigger4HourAggregation(unixtime: int) -> bool:
-    """Check if this timestamp should trigger 4-hour aggregation"""
-    from datetime import datetime
-    dt = datetime.fromtimestamp(unixtime)
-    # 4-hour periods: 00:00-03:45, 04:00-07:45, 08:00-11:45, 12:00-15:45, 16:00-19:45, 20:00-23:45
-    return dt.minute == 45 and dt.hour % 4 == 3
-
-def getRequiredCandlesForAggregation(target_timeframe: str) -> int:
-    """Get number of 15m candles required for aggregation"""
-    if target_timeframe == "1h":
-        return 4   # 4 × 15m = 1h
-    elif target_timeframe == "4h":
-        return 16  # 16 × 15m = 4h
-    else:
-        return 1

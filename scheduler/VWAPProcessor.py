@@ -52,9 +52,11 @@ from sqlalchemy import null
 from logs.logger import get_logger
 from database.trading.TradingHandler import TradingHandler
 from scheduler.SchedulerConstants import CandleDataKeys, Timeframes
-from constants.VWAPConstants import *
+from utils.CommonUtil import CommonUtil
 import time
 from actions.TradingActionUtil import TradingActionUtil
+from constants.TradingHandlerConstants import TradingHandlerConstants
+from utils.IndicatorConstants import IndicatorConstants
 
 logger = get_logger(__name__)
 
@@ -71,8 +73,7 @@ class VWAPProcessor:
     
     def __init__(self, trading_handler: TradingHandler):
         self.trading_handler = trading_handler
-        self.TIMEFRAMES = [Timeframes.FIFTEEN_MIN, Timeframes.ONE_HOUR, Timeframes.FOUR_HOUR]
-    
+        
     def processVWAPForScheduler(self) -> bool:
         """
         NEW SCHEDULER FLOW: Process VWAP calculations with optimized single-query approach.
@@ -99,16 +100,15 @@ class VWAPProcessor:
             # Process VWAP calculations for all tokens
             calcualtedVWAP = self.calculateVWAPForAllTokens(vwapDataByToken)
             
-            if not calcualtedVWAP[CANDLE_UPDATES] and not calcualtedVWAP[SESSION_UPDATES]:
+            if not calcualtedVWAP[IndicatorConstants.VWAPSessions.CANDLE_UPDATES] and not calcualtedVWAP[IndicatorConstants.VWAPSessions.SESSION_UPDATES]:
                 logger.info("No VWAP updates to process")
                 return True
             
             # Execute all VWAP updates in batch
             success = self.recordVWAPCandleAndVWAPStateUpdatedData(calcualtedVWAP)
             
-            totalUpdates = len(calcualtedVWAP[CANDLE_UPDATES]) + len(calcualtedVWAP[SESSION_UPDATES])
-            logger.info(f"VWAP scheduler processing completed: {len(calcualtedVWAP[CANDLE_UPDATES])} candle updates, "
-                       f"{len(calcualtedVWAP[SESSION_UPDATES])} session updates")
+            logger.info(f"VWAP scheduler processing completed: {len(calcualtedVWAP[IndicatorConstants.VWAPSessions.CANDLE_UPDATES])} candle updates, "
+                       f"{len(calcualtedVWAP[IndicatorConstants.VWAPSessions.SESSION_UPDATES])} session updates")
             return success
             
         except Exception as e:
@@ -131,12 +131,12 @@ class VWAPProcessor:
         for tokenAddress, timeframeData in vwapDataByToken.items(): 
             for timeframe, vwapData in timeframeData.items(): 
                 timeframeResults = self.calculateVWAPForATokenForACertainTimeframe(tokenAddress, timeframe, vwapData)
-                allCandleUpdates.extend(timeframeResults[CANDLE_UPDATES])
-                allSessionUpdates.extend(timeframeResults[SESSION_UPDATES])
+                allCandleUpdates.extend(timeframeResults[IndicatorConstants.VWAPSessions.CANDLE_UPDATES])
+                allSessionUpdates.extend(timeframeResults[IndicatorConstants.VWAPSessions.SESSION_UPDATES])
         
         return {
-            CANDLE_UPDATES: allCandleUpdates,
-            SESSION_UPDATES: allSessionUpdates
+            IndicatorConstants.VWAPSessions.CANDLE_UPDATES: allCandleUpdates,
+            IndicatorConstants.VWAPSessions.SESSION_UPDATES: allSessionUpdates
         }
     
     def calculateVWAPForATokenForACertainTimeframe(self, tokenAddress: str, timeframe: str, vwapData: Dict) -> Dict[str, List[Dict]]:
@@ -151,11 +151,12 @@ class VWAPProcessor:
         Returns:
             Dict with 'candleUpdates' and 'sessionUpdates' lists
         """
-        candles = vwapData.get('candles', [])
+        candles = vwapData.get(IndicatorConstants.VWAPSessions.CANDLES, [])
         if not candles:
-            return {CANDLE_UPDATES: [], SESSION_UPDATES: []}
+            return {IndicatorConstants.VWAPSessions.CANDLE_UPDATES: [], 
+            IndicatorConstants.VWAPSessions.SESSION_UPDATES: []}
         
-        pairAddress = vwapData['pairAddress']
+        pairAddress = vwapData[TradingHandlerConstants.TrackedTokens.PAIR_ADDRESS]
         
         # Process all candles with day boundary detection
         return self.calculateVWAP(tokenAddress, pairAddress, timeframe, candles, vwapData)
@@ -166,9 +167,10 @@ class VWAPProcessor:
         """
         Process candles with day boundary detection during iteration.
         
-        This method iterates through candles and decides during iteration whether to:
-        1. Do incremental update (same day, existing session)
-        2. Do full reset (new day or no existing session)
+        This method iterates through candles and resets VWAP session when crossing day boundaries:
+        1. Check if candle is beyond current session end time
+        2. If yes: Reset VWAP session for new day and calculate fresh VWAP
+        3. If no: Continue with incremental VWAP calculation
         
         Returns:
             Dict with 'candleUpdates' and 'sessionUpdates' lists
@@ -176,106 +178,110 @@ class VWAPProcessor:
         candleUpdates = []
         sessionUpdates = []
         
-        # 1. Check if we have existing session data
-        hasExistingSession = vwapData['lastCandleUnix'] > 0
+        # 1. Initialize session state
+        hasExistingSession = vwapData[TradingHandlerConstants.VWAPSessions.LAST_CANDLE_UNIX] > 0
         
         if hasExistingSession:
             # Use existing session data
-            currentCumulativePV = Decimal(str(vwapData['cumulativePV'] or 0))
-            currentCumulativeVolume = Decimal(str(vwapData['cumulativeVolume'] or 0))
-            sessionStartUnix = vwapData['sessionStartUnix']
-            sessionEndUnix = vwapData['sessionEndUnix']
+            currentCumulativePV = Decimal(str(vwapData[TradingHandlerConstants.VWAPSessions.CUMULATIVE_PV] or 0))
+            currentCumulativeVolume = Decimal(str(vwapData[TradingHandlerConstants.VWAPSessions.CUMULATIVE_VOLUME] or 0))
+            sessionStartUnix = vwapData[TradingHandlerConstants.VWAPSessions.SESSION_START_UNIX]
+            sessionEndUnix = vwapData[TradingHandlerConstants.VWAPSessions.SESSION_END_UNIX]
         else:
-            # 2. No existing session - start fresh
+            # No existing session - will be set when first candle is processed
             currentCumulativePV = Decimal('0')
             currentCumulativeVolume = Decimal('0')
-            currentTime = int(time.time())
-            sessionStartUnix = (currentTime // 86400) * 86400  # Start of today
-            sessionEndUnix = sessionStartUnix + 86400          # End of today
+            sessionStartUnix = None
+            sessionEndUnix = None
         
         logger.info(f"Processing {len(candles)} candles for {tokenAddress} {timeframe}: "
                    f"hasExistingSession={hasExistingSession}")
         
-        # 3. Iterate through candles and calculate VWAP
+        # 2. Iterate through candles and calculate VWAP with day boundary detection
         for candle in candles:
-            candleUnix = candle['unixtime']
+            candleUnix = candle[TradingHandlerConstants.OHLCVDetails.UNIX_TIME]
+            candleDay = candleUnix // 86400  # Get day number for this candle
+            
+            # Check if we need to reset VWAP session (new day)
+            if sessionEndUnix is not None:
+                if CommonUtil.isNewDay(candleUnix, sessionEndUnix):
+                    # Day boundary crossed - reset VWAP session for new day
+                    logger.info(f"Day boundary detected for {tokenAddress} {timeframe}: "
+                              f"candle day {candleDay} > session day {sessionEndUnix // 86400}")
+                    
+                    # Reset for new day (but keep same session record)
+                    currentCumulativePV = Decimal('0')
+                    currentCumulativeVolume = Decimal('0')
+                    sessionStartUnix, sessionEndUnix = CommonUtil.getSessionStartAndEndUnix(candleUnix)
+                    hasExistingSession = False  # This is now a fresh session for new day
+            
+            # If no existing session, initialize day boundaries from first candle
+            if sessionStartUnix is None:
+                sessionStartUnix, sessionEndUnix = CommonUtil.getSessionStartAndEndUnix(candleUnix)
             
             # Calculate VWAP for this candle
-            typicalPrice = (candle['highprice'] + candle['lowprice'] + candle['closeprice']) / 3
-            priceVolume = typicalPrice * candle['volume']
+            typicalPrice = (candle[TradingHandlerConstants.OHLCVDetails.HIGH_PRICE] + 
+            candle[TradingHandlerConstants.OHLCVDetails.LOW_PRICE] + 
+            candle[TradingHandlerConstants.OHLCVDetails.CLOSE_PRICE]) / 3
+
+            priceVolume = typicalPrice * candle[TradingHandlerConstants.OHLCVDetails.VOLUME]
             
             # Update cumulative values
             currentCumulativePV += priceVolume
-            currentCumulativeVolume += candle['volume']
+            currentCumulativeVolume += candle[TradingHandlerConstants.OHLCVDetails.VOLUME]
             
             # Calculate current VWAP
             currentVWAP = currentCumulativePV / currentCumulativeVolume if currentCumulativeVolume > 0 else 0
             
             # Create candle update (one per candle)
             candleUpdate = {
-                TOKEN_ADDRESS: tokenAddress,
-                PAIR_ADDRESS: pairAddress,
-                TIMEFRAME: timeframe,
-                CANDLE_UNIX: candleUnix,
-                VWAP_VALUE: float(currentVWAP)
+                TradingHandlerConstants.OHLCVDetails.TOKEN_ADDRESS: tokenAddress,
+                TradingHandlerConstants.OHLCVDetails.PAIR_ADDRESS: pairAddress,
+                TradingHandlerConstants.OHLCVDetails.TIMEFRAME: timeframe,
+                TradingHandlerConstants.OHLCVDetails.UNIX_TIME: candleUnix,
+                TradingHandlerConstants.OHLCVDetails.VWAP_VALUE: float(currentVWAP)
             }
             candleUpdates.append(candleUpdate)
         
-        # 4. Create VWAP session data for batch update
+        # 3. Create ONE session update for the current session (token+pair+timeframe)
         if candles:  # Only if we processed any candles
-            lastCandleUnix = candles[-1]['unixtime']
+            lastCandleUnix = candles[-1][TradingHandlerConstants.OHLCVDetails.UNIX_TIME]
             sessionUpdate = {
-                SESSION_TYPE: INCREMENTAL if hasExistingSession else FULL_RESET,
-                TOKEN_ADDRESS: tokenAddress,
-                PAIR_ADDRESS: pairAddress,
-                TIMEFRAME: timeframe,
-                SESSION_START_UNIX: sessionStartUnix,
-                SESSION_END_UNIX: sessionEndUnix,
-                CUMULATIVE_PV: float(currentCumulativePV),
-                CUMULATIVE_VOLUME: float(currentCumulativeVolume),
-                CURRENT_VWAP: float(currentVWAP),
-                LAST_CANDLE_UNIX: lastCandleUnix,
-                NEXT_CANDLE_FETCH: lastCandleUnix + self.getTimeframeInSeconds(timeframe)
+                IndicatorConstants.VWAPSessions.SESSION_TYPE: IndicatorConstants.VWAPSessions.INCREMENTAL if hasExistingSession else IndicatorConstants.VWAPSessions.FULL_RESET,
+                TradingHandlerConstants.VWAPSessions.TOKEN_ADDRESS: tokenAddress,
+                TradingHandlerConstants.VWAPSessions.PAIR_ADDRESS: pairAddress,
+                TradingHandlerConstants.VWAPSessions.TIMEFRAME: timeframe,
+                TradingHandlerConstants.VWAPSessions.SESSION_START_UNIX: sessionStartUnix,
+                TradingHandlerConstants.VWAPSessions.SESSION_END_UNIX: sessionEndUnix,
+                TradingHandlerConstants.VWAPSessions.CUMULATIVE_PV: float(currentCumulativePV),
+                TradingHandlerConstants.VWAPSessions.CUMULATIVE_VOLUME: float(currentCumulativeVolume),
+                TradingHandlerConstants.VWAPSessions.CURRENT_VWAP: float(currentVWAP),
+                TradingHandlerConstants.VWAPSessions.LAST_CANDLE_UNIX: lastCandleUnix,
+                TradingHandlerConstants.VWAPSessions.NEXT_CANDLE_FETCH: lastCandleUnix + CommonUtil.getTimeframeSeconds(timeframe)
             }
             sessionUpdates.append(sessionUpdate)
         
         return {
-            CANDLE_UPDATES: candleUpdates,
-            SESSION_UPDATES: sessionUpdates
+            IndicatorConstants.VWAPSessions.CANDLE_UPDATES: candleUpdates,
+            IndicatorConstants.VWAPSessions.SESSION_UPDATES: sessionUpdates
         }
     
     
-    def getTimeframeInSeconds(self, timeframe: str) -> int:
-        """Get timeframe duration in seconds."""
-        timeframeMap = {
-            '15m': 900,
-            '30m': 1800,
-            '1h': 3600,
-            '4h': 14400
-        }
-        return timeframeMap.get(timeframe, 3600)
+    
     
     def recordVWAPCandleAndVWAPStateUpdatedData(self, calculatedVWAP: Dict[str, List[Dict]]) -> bool:
         """Execute all VWAP updates in batch."""
         try:
             return self.trading_handler.batchUpdateVWAPData(
-                calculatedVWAP[CANDLE_UPDATES], 
-                calculatedVWAP[SESSION_UPDATES]
+                calculatedVWAP[IndicatorConstants.VWAPSessions.CANDLE_UPDATES], 
+                calculatedVWAP[IndicatorConstants.VWAPSessions.SESSION_UPDATES]
             )
         except Exception as e:
             logger.error(f"Error executing batch VWAP updates: {e}")
             return False
 
     
-    
-    
-    def calculateVwapSessionRange(self, timestamp: int) -> Tuple[int, int]:
-        """Calculate session start (00:00:00) and end (23:59:59) for given timestamp"""
-        dt = datetime.fromtimestamp(timestamp, tz=timezone.utc)
-        session_start = dt.replace(hour=0, minute=0, second=0, microsecond=0)
-        session_end = dt.replace(hour=23, minute=59, second=59, microsecond=999999)
-        
-        return int(session_start.timestamp()), int(session_end.timestamp())
+
     
     
     def calculateVWAPForResetOrNew(self, candles: List[Dict]) -> Dict:
@@ -285,11 +291,11 @@ class VWAPProcessor:
         """
         if not candles:
             return {
-                'cumulative_pv': Decimal('0'),
-                'cumulative_volume': Decimal('0'),
-                'final_vwap': Decimal('0'),
-                'candle_vwaps': [],
-                'latest_candle_time': 0
+                TradingHandlerConstants.VWAPSessions.CUMULATIVE_PV: Decimal('0'),
+                TradingHandlerConstants.VWAPSessions.CUMULATIVE_VOLUME: Decimal('0'),
+                TradingHandlerConstants.VWAPSessions.CURRENT_VWAP: Decimal('0'),
+                IndicatorConstants.VWAPSessions.CANDLE_VWAPS: [],
+                TradingHandlerConstants.VWAPSessions.LAST_CANDLE_UNIX: 0
             }
         
         cumulativePriceVolume = Decimal('0')
@@ -298,10 +304,10 @@ class VWAPProcessor:
         
         for candle in candles:
             # Calculate typical price (HLC/3)
-            high = Decimal(str(candle['highprice']))
-            low = Decimal(str(candle['lowprice']))
-            close = Decimal(str(candle['closeprice']))
-            volume = Decimal(str(candle['volume']))
+            high = Decimal(str(candle[TradingHandlerConstants.OHLCVDetails.HIGH_PRICE]))
+            low = Decimal(str(candle[TradingHandlerConstants.OHLCVDetails.LOW_PRICE]))
+            close = Decimal(str(candle[TradingHandlerConstants.OHLCVDetails.CLOSE_PRICE]))
+            volume = Decimal(str(candle[TradingHandlerConstants.OHLCVDetails.VOLUME]))
             
             price = (high + low + close) / Decimal('3')
             priceVolume = price * volume
@@ -313,16 +319,16 @@ class VWAPProcessor:
             vwap = cumulativePriceVolume / cumulativeVolume if cumulativeVolume > 0 else Decimal('0')
             
             candlesWithVWAP.append({
-                'unixtime': candle['unixtime'],
-                'vwap': vwap
+                TradingHandlerConstants.OHLCVDetails.UNIX_TIME: candle[TradingHandlerConstants.OHLCVDetails.UNIX_TIME],
+                TradingHandlerConstants.OHLCVDetails.VWAP_VALUE : vwap
             })
         
         return {
-            'cumulative_pv': cumulativePriceVolume,
-            'cumulative_volume': cumulativeVolume, 
-            'final_vwap': vwap,
-            'candle_vwaps': candlesWithVWAP,
-            'latest_candle_time': candles[-1]['unixtime']
+            TradingHandlerConstants.VWAPSessions.CUMULATIVE_PV: cumulativePriceVolume,
+            TradingHandlerConstants.VWAPSessions.CUMULATIVE_VOLUME: cumulativeVolume, 
+            TradingHandlerConstants.VWAPSessions.CURRENT_VWAP: vwap,
+            IndicatorConstants.VWAPSessions.CANDLE_VWAPS: candlesWithVWAP,
+            TradingHandlerConstants.VWAPSessions.LAST_CANDLE_UNIX: candles[-1][TradingHandlerConstants.OHLCVDetails.UNIX_TIME]
         }
     
     def _calculateIncrementalVWAP(self, exsistingVwapSession: Dict, newCandlesToUpdateVwap: List[Dict]) -> Dict:
@@ -407,7 +413,8 @@ class VWAPProcessor:
     
     def calculateDayStart(self, currentTime: int) -> int:
         """Calculate start of current day in UTC."""
-        return (currentTime // 86400) * 86400
+        sessionStart, _ = CommonUtil.getSessionStartAndEndUnix(currentTime)
+        return sessionStart
     
     def calculateVWAPForAllTimeframes(self, tokenAddress: str, pairAddress: str, 
                                    allCandles: Dict[str, List[Dict]], 
@@ -424,15 +431,10 @@ class VWAPProcessor:
             todayCandles = self.filterTodaysCandles(candles, dayStart)
             
             if todayCandles:
-                vwapSession = self.createVWAPSessionWithCandles(
-                    timeframe, todayCandles, dayStart
-                )
-                logger.info(f"Prepared VWAP operation for {tokenAddress} {timeframe}: "
-                           f"{len(todayCandles)} candles")
+                vwapSession = self.createVWAPSessionWithCandles(timeframe, todayCandles, dayStart)
+                logger.info(f"Prepared VWAP operation for {tokenAddress} {timeframe}: {len(todayCandles)} candles")
             else:
-                vwapSession = self.createEmptyVWAPSession(
-                    timeframe, dayStart, currentTime
-                )
+                vwapSession = self.createEmptyVWAPSession(timeframe, dayStart, currentTime)
                 logger.info(f"Prepared empty VWAP operation for {tokenAddress} {timeframe}")
             
             vwapSessions.append(vwapSession)
@@ -444,48 +446,46 @@ class VWAPProcessor:
         if not candles:
             return []
         
-        dayEnd = dayStart + 86400
-        return [c for c in candles if dayStart <= c['unixtime'] < dayEnd]
+        _, dayEnd = CommonUtil.getSessionStartAndEndUnix(dayStart)
+        return [c for c in candles if dayStart <= c[TradingHandlerConstants.OHLCVDetails.UNIX_TIME] <= dayEnd]
     
     def createVWAPSessionWithCandles(self, timeframe: str, todayCandles: List[Dict], 
                                       dayStart: int) -> Dict:
         """Create VWAP operation data for timeframes with candle data."""
         calculatedVwap = self.calculateVWAPForResetOrNew(todayCandles)
-        nextCandleFetchTime = TradingActionUtil.calculateNextCandleFetch(
-            timeframe, calculatedVwap['latest_candle_time']
-        )
-        dayEnd = dayStart + 86400
+        nextCandleFetchTime = TradingActionUtil.calculateNextCandleFetch(timeframe, calculatedVwap[TradingHandlerConstants.VWAPSessions.LAST_CANDLE_UNIX])
+        _, dayEnd = CommonUtil.getSessionStartAndEndUnix(dayStart)
         
         return {
-            'timeframe': timeframe,
-            'today_candles': todayCandles,
-            'vwap_result': calculatedVwap,
-            'next_candle_fetch': nextCandleFetchTime,
-            'day_start': dayStart,
-            'day_end': dayEnd,
-            'has_candles': True
+            TradingHandlerConstants.TimeframeMetadata.TIMEFRAME: timeframe,
+            IndicatorConstants.VWAPSessions.TODAY_CANDLES: todayCandles,
+            TradingHandlerConstants.VWAPSessions.CURRENT_VWAP: calculatedVwap,
+            TradingHandlerConstants.VWAPSessions.NEXT_CANDLE_FETCH: nextCandleFetchTime,
+            TradingHandlerConstants.VWAPSessions.SESSION_START_UNIX: dayStart,
+            TradingHandlerConstants.VWAPSessions.SESSION_END_UNIX: dayEnd,
+            IndicatorConstants.VWAPSessions.HAS_CANDLES: True
         }
     
     def createEmptyVWAPSession(self, timeframe: str, dayStart: int, 
                                 currentTime: int) -> Dict:
         """Create empty VWAP operation data for timeframes without candle data."""
         emptyVwapResult = {
-            'cumulative_pv': 0,
-            'cumulative_volume': 0,
-            'final_vwap': 0,
-            'latest_candle_time': None,
-            'candle_vwaps': []
+            TradingHandlerConstants.VWAPSessions.CUMULATIVE_PV: 0,
+            TradingHandlerConstants.VWAPSessions.CUMULATIVE_VOLUME: 0,
+            TradingHandlerConstants.VWAPSessions.CURRENT_VWAP: 0,
+            TradingHandlerConstants.VWAPSessions.LAST_CANDLE_UNIX: None,
+            IndicatorConstants.VWAPSessions.CANDLE_VWAPS: []
         }
-        dayEnd = dayStart + 86400
+        _, dayEnd = CommonUtil.getSessionStartAndEndUnix(dayStart)
         
         return {
-            'timeframe': timeframe,
-            'today_candles': [],
-            'vwap_result': emptyVwapResult,
-            'next_candle_fetch': None,
-            'day_start': dayStart,
-            'day_end': dayEnd,
-            'has_candles': False
+            TradingHandlerConstants.TimeframeMetadata.TIMEFRAME: timeframe,
+            IndicatorConstants.VWAPSessions.TODAY_CANDLES: [],
+            TradingHandlerConstants.VWAPSessions.CURRENT_VWAP: emptyVwapResult,
+            TradingHandlerConstants.VWAPSessions.NEXT_CANDLE_FETCH: None,
+            TradingHandlerConstants.VWAPSessions.SESSION_START_UNIX: dayStart,
+            TradingHandlerConstants.VWAPSessions.SESSION_END_UNIX: dayEnd,
+            IndicatorConstants.VWAPSessions.HAS_CANDLES: False
         }
     
     

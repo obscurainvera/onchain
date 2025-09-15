@@ -38,7 +38,7 @@ class CandleKeys:
 
 class Timeframes:
     """Constants for timeframe values"""
-    FIFTEEN_MIN = '15m'
+    THIRTY_MIN='30m'
     ONE_HOUR = '1h'
     FOUR_HOUR = '4h'
 
