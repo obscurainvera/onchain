@@ -1,11 +1,9 @@
 
-from config.Config import get_config
 from constants.TradingSchedulerConstants import TradingSchedulerConstants
 from database.operations.PortfolioDB import PortfolioDB
 from database.trading.TradingHandler import TradingHandler
-from database.trading.TradingModels import SchedulerConfig
 from scheduler.SchedulerUtil import SchedulerUtil
-from scheduler.SchedulerConstants import FetchResultKeys, CandleDataKeys
+from scheduler.SchedulerConstants import CandleDataKeys
 from constants.TradingConstants import TimeframeConstants
 from logs.logger import get_logger
 from typing import List, Dict, Any
@@ -35,7 +33,6 @@ class TradingScheduler:
         self.trading_action = TradingActionEnhanced(self.db)
         
         # Use configuration constants from TradingModels
-        self.config = SchedulerConfig()
         self.current_time = int(time.time())
         
         logger.info("Trading scheduler initialized with static SchedulerUtil methods")
@@ -88,7 +85,7 @@ class TradingScheduler:
     def getAllTimeframeRecordsForCandleFetchingFromAPI(self) -> List[Dict[str, Any]]:
         try:
             timeframeRecordsReadyForFetching = self.trading_handler.getAllTimeframeRecordsReadyForFetching(
-                buffer_seconds=self.config.NEW_TOKEN_BUFFER_SECONDS
+                buffer_seconds=1000
             )
             
             logger.info(f"Found {len(timeframeRecordsReadyForFetching)} timeframe records ready for update (with buffer applied)")

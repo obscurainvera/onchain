@@ -306,13 +306,6 @@ class TradingHandler(BaseDBHandler):
             logger.error(f"Error getting active tokens: {e}")
             return []
 
-  
-    
-    
-    
-    
-    
-   
     
     def _calculateTimeBucket(self, unixtime: int, timeframe: str) -> int:
         """Calculate timebucket based on timeframe - delegates to CommonUtil"""
@@ -489,8 +482,6 @@ class TradingHandler(BaseDBHandler):
                 VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                 ON CONFLICT (tokenaddress, timeframe, unixtime) DO NOTHING
             """, candleInsertData)
-    
-
     
     def getAllVWAPDataForScheduler(self) -> Dict[str, Dict[str, Dict]]:
         """
@@ -788,7 +779,6 @@ class TradingHandler(BaseDBHandler):
             logger.error(f"Error getting EMA data with candles for scheduler: {e}")
             return {}
 
-    
 
     def createTimeframeInitialRecords(self, tokenAddress: str, pairAddress: str, timeframes: List[str], 
                                     pairCreatedTime: int) -> bool:
@@ -1136,10 +1126,6 @@ class TradingHandler(BaseDBHandler):
         except Exception as e:
             logger.error(f"Error in API VWAP operations: {e}")
             return {'success': False, 'error': str(e)}
-
-
-
-
 
     def updateEMA(self, emaStateUpdatedData: List[Dict], emaCandleUpdatedData: List[Dict]):
         """

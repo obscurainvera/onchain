@@ -61,11 +61,11 @@ from typing import Dict, List, Any, Optional, Tuple
 from decimal import Decimal
 from constants.TradingAPIConstants import TradingAPIConstants
 from logs.logger import get_logger
-from database.trading.TradingHandler import TradingHandler, EMAStatus
-from scheduler.SchedulerConstants import Timeframes
+from database.trading.TradingHandler import TradingHandler
 from actions.TradingActionUtil import TradingActionUtil
 from utils.CommonUtil import CommonUtil
 from constants.TradingHandlerConstants import TradingHandlerConstants
+from database.trading.TradingHandler import EMAStatus
 
 from utils.IndicatorConstants import IndicatorConstants
 
