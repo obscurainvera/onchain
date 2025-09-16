@@ -84,6 +84,7 @@ from api.dexscrenner.DexScrennerAPI import dexscrenner_bp
 from api.onchain.OnchainAPI import onchain_bp
 from api.tradingattention.TradingAttentionAPI import tradingattention_bp
 from api.tradingattention.TradingAttentionReportAPI import trading_attention_report_bp
+from api.trading.TradingAPI import trading_bp
 
 logger = get_logger(__name__)
 
@@ -214,7 +215,8 @@ class PortfolioApp:
             reports_page_bp, port_summary_report_bp, smartMoneyWalletsReportBp,
             smartMoneyPerformanceReportBp, strategy_report_bp, strategyperformance_bp,
             smwalletBehaviourReportBp, smwallet_investment_range_report_bp, portfolio_allocation_bp,
-            attention_report_bp, dexscrenner_bp, tradingattention_bp, trading_attention_report_bp
+            attention_report_bp, dexscrenner_bp, tradingattention_bp, trading_attention_report_bp,
+            trading_bp
         ]
         for bp in blueprints:
             self.app.register_blueprint(bp)

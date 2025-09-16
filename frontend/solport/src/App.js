@@ -1,18 +1,12 @@
 import React from 'react';
 import { BrowserRouter as Router, Routes, Route, Link, NavLink } from 'react-router-dom';
 import 'bootstrap/dist/css/bootstrap.min.css';
-import PortSummaryReport from './components/PortSummaryReport';
-import SmartMoneyPerformanceReport from './components/SmartMoneyPerformanceReport';
-import StrategyReport from './components/StrategyReport';
 import Home from './components/Home';
-import Operations from './components/Operations';
-import Strategy from './components/Strategy';
-import Analytics from './components/Analytics';
-import StrategyPerformanceReport from './components/StrategyPerformanceReport';
-import FastTrackingReport from './components/FastTrackingReport';
-import AttentionReport from './components/AttentionReport';
 import TradingAttentionReport from './components/TradingAttentionReport';
 import PortfolioCalculator from './components/PortfolioCalculator';
+import TokenAddPage from './components/TokenAddPage';
+import TokenListPage from './components/TokenListPage';
+import TokenDisablePage from './components/TokenDisablePage';
 import './App.css';
 import { FaCoins } from 'react-icons/fa';
 
@@ -29,31 +23,21 @@ function App() {
           </div>
           <nav>
             <NavLink to="/" className={({ isActive }) => isActive ? "App-link active" : "App-link"} end>Home</NavLink>
-            <NavLink to="/portsummary" className={({ isActive }) => isActive ? "App-link active" : "App-link"}>Portfolio</NavLink>
-            <NavLink to="/smartmoney" className={({ isActive }) => isActive ? "App-link active" : "App-link"}>Smart Money</NavLink>
-            <NavLink to="/operations" className={({ isActive }) => isActive ? "App-link active" : "App-link"}>Operations</NavLink>
-            <NavLink to="/strategy" className={({ isActive }) => isActive ? "App-link active" : "App-link"}>Strategy</NavLink>
-            <NavLink to="/performance" className={({ isActive }) => isActive ? "App-link active" : "App-link"}>Performance</NavLink>
-            <NavLink to="/fasttracking" className={({ isActive }) => isActive ? "App-link active" : "App-link"}>Fast Tracking</NavLink>
-            <NavLink to="/attention" className={({ isActive }) => isActive ? "App-link active" : "App-link"}>Attention</NavLink>
             <NavLink to="/tradingattention" className={({ isActive }) => isActive ? "App-link active" : "App-link"}>Trading Attention</NavLink>
             <NavLink to="/calculator" className={({ isActive }) => isActive ? "App-link active" : "App-link"}>Calculator</NavLink>
+            <NavLink to="/addtoken" className={({ isActive }) => isActive ? "App-link active" : "App-link"}>Add Token</NavLink>
+            <NavLink to="/tokens" className={({ isActive }) => isActive ? "App-link active" : "App-link"}>Token List</NavLink>
+            <NavLink to="/disabletoken" className={({ isActive }) => isActive ? "App-link active" : "App-link"}>Disable Token</NavLink>
           </nav>
         </header>
         <main className="container fade-in">
           <Routes>
             <Route path="/" element={<Home />} />
-            <Route path="/portsummary" element={<PortSummaryReport />} />
-            <Route path="/smartmoney" element={<SmartMoneyPerformanceReport />} />
-            <Route path="/operations" element={<Operations />} />
-            <Route path="/strategy" element={<Strategy />} />
-            <Route path="/analytics" element={<Analytics />} />
-            <Route path="/strategyreport" element={<StrategyReport />} />
-            <Route path="/performance" element={<StrategyPerformanceReport />} />
-            <Route path="/fasttracking" element={<FastTrackingReport />} />
-            <Route path="/attention" element={<AttentionReport />} />
             <Route path="/tradingattention" element={<TradingAttentionReport />} />
             <Route path="/calculator" element={<PortfolioCalculator />} />
+            <Route path="/addtoken" element={<TokenAddPage />} />
+            <Route path="/tokens" element={<TokenListPage />} />
+            <Route path="/disabletoken" element={<TokenDisablePage />} />
             <Route path="/tokenmetrics" element={
               <div className="coming-soon">
                 <h2>Token Metrics</h2>

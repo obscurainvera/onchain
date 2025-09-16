@@ -495,9 +495,7 @@ class CredentialsHandler(BaseDBHandler):
             logger.error(f"Failed to reduce credits for {serviceName}: {str(e)}")
             return False
 
-    def getNextValidApiKey(
-        self, serviceName: str, requiredCredits: int
-    ) -> Optional[Dict]:
+    def getNextValidApiKey(self, serviceName: str, requiredCredits: int) -> Optional[Dict]:
         """
         Get next API key with sufficient credits
 

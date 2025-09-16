@@ -11,16 +11,7 @@ from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.jobstores.sqlalchemy import SQLAlchemyJobStore
 from apscheduler.events import EVENT_JOB_ERROR, EVENT_JOB_EXECUTED
 from config.SchedulerConfig import SCHEDULER_CONFIG
-from scheduler.PortfolioScheduler import PortfolioScheduler
-from scheduler.WalletsInvestedScheduler import WalletsInvestedScheduler
-from scheduler.VolumebotScheduler import VolumeBotScheduler
-from scheduler.PumpfunScheduler import PumpFunScheduler
-from scheduler.OnchainScheduler import OnchainScheduler
-from scheduler.TradingAttentionScheduler import TradingAttentionScheduler
-from scheduler.AttentionScheduler import AttentionScheduler
-from scheduler.DeactivateLostSMBalanceTokens import DeactiveLostSMBalanceTokens
-from scheduler.ExecutionMonitorScheduler import ExecutionMonitorScheduler
-from database.operations.PortfolioDB import PortfolioDB
+from scheduler.TradingScheduler import TradingScheduler
 from database.operations.DatabaseConnectionManager import DatabaseConnectionManager
 from database.job.job_handler import JobHandler
 import time
@@ -62,24 +53,9 @@ def with_retries(job_func, scheduler_class):
                 raise
 
 
-def run_volume_bot_analysis_job():
-    """Run volume bot analysis with retry logic."""
-    with_retries(VolumeBotScheduler.handleVolumeAnalysisFromJob, VolumeBotScheduler)
-
-
-def run_pump_fun_analysis_job():
-    """Run pump fun analysis with retry logic."""
-    with_retries(PumpFunScheduler.handlePumpFunAnalysisFromJob, PumpFunScheduler)
-
-
-def run_onchain_analysis_job():
-    """Run onchain analysis with retry logic."""
-    with_retries(OnchainScheduler.handleOnchainAnalysisFromJob, OnchainScheduler)
-
-
-def run_trading_attention_analysis_job():
-    """Run trading attention analysis with retry logic."""
-    with_retries(TradingAttentionScheduler.handleTradingAttentionAnalysisFromJob, TradingAttentionScheduler)
+def run_trading_updates_job():
+    """Run trading data updates with retry logic."""
+    with_retries(TradingScheduler.handleTradingUpdatesFromJob, TradingScheduler)
 
 
 class JobRunner:
@@ -114,23 +90,14 @@ class JobRunner:
         """Configure all scheduled jobs with configurable triggers."""
         config = get_config()
         jobs = [
-            ("volume_bot_analysis", {"minute": "*/2"}),
-            ("pump_fun_analysis", {"minute": "*/2"}),
-            ("onchain_analysis", {"minute": "*/10"}),
-            ("trading_attention_analysis", {"hour": "*/1"})
+            ("trading_updates", {"minute": "*/5"})
         ]
         for job_id, default_schedule in jobs:
             schedule = config.JOB_SCHEDULES.get(job_id, default_schedule)
 
             # Use named functions instead of lambdas
-            if job_id == "volume_bot_analysis":
-                job_func = run_volume_bot_analysis_job
-            if job_id == "pump_fun_analysis":
-                job_func = run_pump_fun_analysis_job
-            if job_id == "onchain_analysis":
-                job_func = run_onchain_analysis_job
-            if job_id == "trading_attention_analysis":
-                job_func = run_trading_attention_analysis_job
+            if job_id == "trading_updates":
+                job_func = run_trading_updates_job
             
 
             self.scheduler.add_job(

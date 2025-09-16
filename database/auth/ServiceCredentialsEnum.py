@@ -65,6 +65,32 @@ class ServiceCredentials(Enum):
         }
     }
 
+    BIRDEYE = {
+        "service_name": "birdeye",
+        "credential_type": CredentialType.API_KEY,
+        "requires_credits": True,
+        "metadata": {
+            "base_url": "https://public-api.birdeye.so",
+            "credits_per_call": 40,
+            "rate_limit": 60,
+            "description": "BirdEye API for Solana token OHLCV data"
+        }
+    }
+
+    MORALIS = {
+        "service_name": "moralis",
+        "credential_type": CredentialType.API_KEY,
+        "requires_credits": True,
+        "metadata": {
+            "base_url": "https://solana-gateway.moralis.io",
+            "credits_per_call": 150,
+            "rate_limit": 30,
+            "description": "Moralis API for token OHLCV data across multiple chains",
+            "supported_timeframes": ["1s", "10s", "30s", "1min", "5min", "10min", "30min", "1h", "4h", "12h", "1d", "1w", "1M"],
+            "default_chain": "mainnet"
+        }
+    }
+
     def __init__(self, config: Dict):
         self.service_name = config["service_name"]
         self.credential_type = config["credential_type"]
