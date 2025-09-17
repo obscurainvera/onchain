@@ -12,6 +12,7 @@ from apscheduler.jobstores.sqlalchemy import SQLAlchemyJobStore
 from apscheduler.events import EVENT_JOB_ERROR, EVENT_JOB_EXECUTED
 from config.SchedulerConfig import SCHEDULER_CONFIG
 from scheduler.TradingScheduler import TradingScheduler
+from scheduler.CredentialResetScheduler import CredentialResetScheduler
 from database.operations.DatabaseConnectionManager import DatabaseConnectionManager
 from database.job.job_handler import JobHandler
 import time
@@ -58,6 +59,11 @@ def run_trading_updates_job():
     with_retries(TradingScheduler.handleTradingUpdatesFromJob, TradingScheduler)
 
 
+def run_credential_reset_job():
+    """Run credential reset job with retry logic."""
+    with_retries(CredentialResetScheduler.runDailyResetJob, CredentialResetScheduler)
+
+
 class JobRunner:
     """
     Manages APScheduler for scheduling and executing background jobs.
@@ -90,7 +96,8 @@ class JobRunner:
         """Configure all scheduled jobs with configurable triggers."""
         config = get_config()
         jobs = [
-            ("trading_updates", {"minute": "*/5"})
+            ("trading_updates", {"minute": "*/5"}),
+            ("credential_reset", {"hour": 2, "minute": 0})  # Daily at 2 AM
         ]
         for job_id, default_schedule in jobs:
             schedule = config.JOB_SCHEDULES.get(job_id, default_schedule)
@@ -98,6 +105,8 @@ class JobRunner:
             # Use named functions instead of lambdas
             if job_id == "trading_updates":
                 job_func = run_trading_updates_job
+            elif job_id == "credential_reset":
+                job_func = run_credential_reset_job
             
 
             self.scheduler.add_job(

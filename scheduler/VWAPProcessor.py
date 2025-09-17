@@ -44,14 +44,12 @@ KEY SIMPLIFICATIONS:
 - Simplified 4-step process: initialize → iterate → calculate → update
 """
 
-from typing import Dict, List, Any, Optional, Tuple
+from typing import Dict, List, Any
 from decimal import Decimal
-from datetime import datetime, timezone
 
-from sqlalchemy import null
 from logs.logger import get_logger
 from database.trading.TradingHandler import TradingHandler
-from scheduler.SchedulerConstants import CandleDataKeys, Timeframes
+from scheduler.SchedulerConstants import CandleDataKeys
 from utils.CommonUtil import CommonUtil
 import time
 from actions.TradingActionUtil import TradingActionUtil
