@@ -108,6 +108,7 @@ class TradingHandler(BaseDBHandler):
                 volume DECIMAL(20,4) NOT NULL,
                 trades INTEGER DEFAULT 0,
                 vwapvalue DECIMAL(20,8),
+                avwapvalue DECIMAL(20,8),
                 ema21value DECIMAL(20,8),
                 ema34value DECIMAL(20,8),
                 iscomplete BOOLEAN DEFAULT TRUE,
@@ -153,6 +154,21 @@ class TradingHandler(BaseDBHandler):
                 currentvwap DECIMAL(20,8),
                 lastcandleunix BIGINT,
                 nextcandlefetch BIGINT,
+                createdat TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+                lastupdatedat TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+                PRIMARY KEY (tokenaddress, timeframe)
+            )
+        """))
+        
+        # 6. AVWAP States
+        cursor.execute(text("""
+            CREATE TABLE IF NOT EXISTS avwapstates (
+                tokenaddress CHAR(44),
+                pairaddress CHAR(44),
+                timeframe VARCHAR(10),
+                avwap DECIMAL(20,8),
+                lastupdatedunix BIGINT,
+                nextfetchtime BIGINT,
                 createdat TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
                 lastupdatedat TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
                 PRIMARY KEY (tokenaddress, timeframe)
@@ -1213,6 +1229,72 @@ class TradingHandler(BaseDBHandler):
                 
         except Exception as e:
             logger.error(f"Error in batch EMA operations: {e}")
+            raise
+
+    def batchUpdateAVWAPData(self, avwapStateData: List[Dict], avwapCandleUpdateData: List[Dict]) -> bool:
+        """
+        Execute batch AVWAP operations in database
+        
+        Args:
+            avwapStateData: List of AVWAP state records to insert/update
+            avwapCandleUpdateData: List of candle AVWAP updates
+            
+        Returns:
+            bool: True if successful
+        """
+        try:
+            with self.conn_manager.transaction() as cursor:
+                # STEP 1: Batch insert/update AVWAP states
+                if avwapStateData:
+                    avwapStateQueryData = []
+                    for avwapState in avwapStateData:
+                        avwapStateQueryData.append((
+                            avwapState[TradingHandlerConstants.AVWAPStates.TOKEN_ADDRESS],
+                            avwapState[TradingHandlerConstants.AVWAPStates.PAIR_ADDRESS],
+                            avwapState[TradingHandlerConstants.AVWAPStates.TIMEFRAME],
+                            float(avwapState[TradingHandlerConstants.AVWAPStates.AVWAP]),
+                            avwapState[TradingHandlerConstants.AVWAPStates.LAST_UPDATED_UNIX],
+                            avwapState[TradingHandlerConstants.AVWAPStates.NEXT_FETCH_TIME]
+                        ))
+                    
+                    cursor.executemany("""
+                        INSERT INTO avwapstates 
+                        (tokenaddress, pairaddress, timeframe, avwap, lastupdatedunix, nextfetchtime,
+                         createdat, lastupdatedat)
+                        VALUES (%s, %s, %s, %s, %s, %s, NOW(), NOW())
+                        ON CONFLICT (tokenaddress, timeframe) 
+                        DO UPDATE SET 
+                            avwap = EXCLUDED.avwap,
+                            lastupdatedunix = EXCLUDED.lastupdatedunix,
+                            nextfetchtime = EXCLUDED.nextfetchtime,
+                            lastupdatedat = NOW()
+                    """, avwapStateQueryData)
+                    
+                    logger.info(f"Batch inserted/updated {len(avwapStateQueryData)} AVWAP states")
+                
+                # STEP 2: Batch update AVWAP values in candles
+                if avwapCandleUpdateData:
+                    avwapCandleQueryData = []
+                    for candle in avwapCandleUpdateData:
+                        avwapCandleQueryData.append((
+                            float(candle[TradingHandlerConstants.OHLCVDetails.AVWAP_VALUE]),
+                            candle[TradingHandlerConstants.OHLCVDetails.TOKEN_ADDRESS],
+                            candle[TradingHandlerConstants.OHLCVDetails.TIMEFRAME],
+                            candle[TradingHandlerConstants.OHLCVDetails.UNIX_TIME]
+                        ))
+                    
+                    cursor.executemany("""
+                        UPDATE ohlcvdetails 
+                        SET avwapvalue = %s, lastupdatedat = NOW()
+                        WHERE tokenaddress = %s AND timeframe = %s AND unixtime = %s
+                    """, avwapCandleQueryData)
+                    
+                    logger.info(f"Batch updated {len(avwapCandleQueryData)} AVWAP candle values")
+            
+            return True
+            
+        except Exception as e:
+            logger.error(f"Error in batch AVWAP operations: {e}")
             raise
 
     

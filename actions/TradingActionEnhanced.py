@@ -9,6 +9,7 @@ from services.MoralisServiceHandler import MoralisServiceHandler
 from constants.TradingConstants import TimeframeConstants, TokenFlowConstants, ValidationMessages
 from scheduler.VWAPProcessor import VWAPProcessor
 from scheduler.EMAProcessor import EMAProcessor
+from scheduler.AVWAPProcessor import AVWAPProcessor
 from scheduler.SchedulerConstants import CandleDataKeys
 
 
@@ -29,10 +30,12 @@ class TradingActionEnhanced:
         # Initialize processor instances
         self.vwap_processor = VWAPProcessor(self.trading_handler)
         self.ema_processor = EMAProcessor(self.trading_handler)
+        self.avwap_processor = AVWAPProcessor(self.trading_handler)
  
 
     def addNewTokenWithTimeframes(self, tokenAddress: str, pairAddress: str, symbol: str, name: str, 
-                                 pairCreatedTime: int, timeframes: List[str], addedBy: str) -> Dict[str, Any]:
+                                 pairCreatedTime: int, timeframes: List[str], addedBy: str, 
+                                 avwapData: Dict = None) -> Dict[str, Any]:
         """
         NEW FLOW: Add new token with specified timeframes using Moralis API
         
@@ -57,8 +60,8 @@ class TradingActionEnhanced:
                 tokenAddress, pairAddress, symbol, timeframes, pairCreatedTime
             )
             
-            # Step 4: Calculate and update VWAP and EMA for all timeframes
-            self.calculateAndUpdateIndicatorsForNewTokenFromAPI(tokenAddress, pairAddress, pairCreatedTime, timeframes)
+            # Step 4: Calculate and update VWAP, EMA, and AVWAP for all timeframes
+            self.calculateAndUpdateIndicatorsForNewTokenFromAPI(tokenAddress, pairAddress, pairCreatedTime, timeframes, avwapData)
             
             return self.constructSuccessResponseForNewTokenFromAPI(tokenId, candleResults, timeframes)
             
@@ -126,13 +129,14 @@ class TradingActionEnhanced:
         return {'candlesInserted': candlesInserted, 'creditsUsed': totalCreditsUsed}
     
     def calculateAndUpdateIndicatorsForNewTokenFromAPI(self, tokenAddress: str, pairAddress: str, 
-                                       pairCreatedTime: int, timeframes: List[str]):
+                                       pairCreatedTime: int, timeframes: List[str], avwapData: Dict = None):
         """
-        Calculate and update VWAP and EMA indicators for all timeframes
+        Calculate and update VWAP, EMA, and AVWAP indicators for all timeframes
         
         This method processes indicators for the new token across all requested timeframes:
         - VWAP: Volume-weighted average price calculations
         - EMA: Exponential moving averages (21 and 34 periods)
+        - AVWAP: Anchored volume-weighted average price from user input
         """
         try:
             logger.info(f"Calculating indicators for {tokenAddress} across timeframes: {timeframes}")
@@ -151,6 +155,10 @@ class TradingActionEnhanced:
             # Process EMA for all timeframes  
             calculatedEMA = self.ema_processor.calcualteEMAForNewTokenFromAPI(tokenAddress, pairAddress, pairCreatedTime, allCandles)
             
+            # Process AVWAP for all timeframes (mandatory)
+            avwapResults = self.avwap_processor.setAVWAPForTokenFromAPI(tokenAddress, pairAddress, avwapData, allCandles)
+            logger.info(f"Processed AVWAP data for {tokenAddress}: {avwapResults.get('success', False)}")
+            
             logger.info(f"Successfully calculated indicators for {tokenAddress}")
             
         except Exception as e:
@@ -158,13 +166,15 @@ class TradingActionEnhanced:
             # Don't raise - indicators are supplementary, token addition should still succeed
 
     def calculateAndUpdateIndicatorsForOldTokenFromAPI(self, tokenAddress: str, pairAddress: str, 
-                                       pairCreatedTime: int, timeframes: List[str], perTimeframeEMAData: Dict):
+                                       pairCreatedTime: int, timeframes: List[str], perTimeframeEMAData: Dict,
+                                       avwapData: Dict = None):
         """
-        Calculate and update VWAP and EMA indicators for all timeframes
+        Calculate and update VWAP, EMA, and AVWAP indicators for all timeframes
         
-        This method processes indicators for the new token across all requested timeframes:
+        This method processes indicators for the old token across all requested timeframes:
         - VWAP: Volume-weighted average price calculations
         - EMA: Exponential moving averages (21 and 34 periods)
+        - AVWAP: Anchored volume-weighted average price from user input
         """
         try:
             logger.info(f"Calculating indicators for {tokenAddress} across timeframes: {timeframes}")
@@ -186,6 +196,9 @@ class TradingActionEnhanced:
                 tokenAddress, pairAddress, pairCreatedTime, perTimeframeEMAData, allCandles
             )
             
+            # Process AVWAP for all timeframes (mandatory)
+            avwapResults = self.avwap_processor.setAVWAPForTokenFromAPI(tokenAddress, pairAddress, avwapData, allCandles)
+            logger.info(f"Processed AVWAP data for {tokenAddress}: {avwapResults.get('success', False)}")
             
             logger.info(f"Successfully calculated indicators for {tokenAddress}")
             
@@ -195,7 +208,7 @@ class TradingActionEnhanced:
     
     def addOldTokenWithTimeframes(self, tokenAddress: str, pairAddress: str, symbol: str, name: str,
                                  pairCreatedTime: int, timeframes: List[str], perTimeframeEMAData: Dict,
-                                 addedBy: str) -> Dict[str, Any]:
+                                 addedBy: str, avwapData: Dict = None) -> Dict[str, Any]:
         """
         OLD TOKEN FLOW: Add old token (>7 days) with specified timeframes using Moralis API
         
@@ -221,8 +234,8 @@ class TradingActionEnhanced:
                 tokenAddress, pairAddress, symbol, timeframes
             )
             
-            # Step 4: Calculate and update VWAP and EMA for successfully fetched timeframes
-            self.calculateAndUpdateIndicatorsForOldTokenFromAPI(tokenAddress, pairAddress, pairCreatedTime, timeframes, perTimeframeEMAData)
+            # Step 4: Calculate and update VWAP, EMA, and AVWAP for successfully fetched timeframes
+            self.calculateAndUpdateIndicatorsForOldTokenFromAPI(tokenAddress, pairAddress, pairCreatedTime, timeframes, perTimeframeEMAData, avwapData)
             
             return self.constructSuccessResponseForOldTokenFromAPI(tokenId, candleResults, timeframes, perTimeframeEMAData)
             

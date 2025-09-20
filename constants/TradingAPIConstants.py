@@ -22,3 +22,4 @@ class TradingAPIConstants:
     class Log:
         EMA_21_TYPE = 'ema21'
         EMA_34_TYPE = 'ema34'
+        AVWAP_TYPE = 'avwap'

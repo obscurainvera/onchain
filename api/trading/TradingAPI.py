@@ -301,10 +301,10 @@ def listTokens():
 def addNewToken(requestData: dict, tradingAction, tokenAddress: str, pairAddress: str,
                            tokenInfoFromAPI, pairCreatedTime: int, addedBy: str):
     """
-    Handle new token flow with timeframes validation and processing
+    Handle new token flow with timeframes and AVWAP validation and processing
     
     Args:
-         requestData: Request payload containing timeframes
+         requestData: Request payload containing timeframes and AVWAP data
          tradingAction: TradingActionEnhanced instance
          tokenAddress: Token contract address
          pairAddress: Token pair address
@@ -318,7 +318,15 @@ def addNewToken(requestData: dict, tradingAction, tokenAddress: str, pairAddress
     # Extract and validate timeframes
     timeframes = requestData.get('timeframes', [])
     
-    # Process new token with validated timeframes
+    # Validate AVWAP data for new token
+    avwapData = requestData.get(TradingAPIConstants.Log.AVWAP_TYPE)
+    
+    # Use new token validation (only AVWAP required)
+    isValid, errorMessage, processedAVWAPData = TradingAPIUtil.validateNewTokenRequirements(avwapData)
+    if not isValid:
+        return {'success': False, 'error': errorMessage}
+    
+    # Process new token with validated timeframes and AVWAP data
     return tradingAction.addNewTokenWithTimeframes(
          tokenAddress=tokenAddress,
          pairAddress=pairAddress,
@@ -326,17 +334,18 @@ def addNewToken(requestData: dict, tradingAction, tokenAddress: str, pairAddress
          name=tokenInfoFromAPI.name,
          pairCreatedTime=pairCreatedTime,
          timeframes=timeframes,
-         addedBy=addedBy
+         addedBy=addedBy,
+         avwapData=processedAVWAPData
     )
 
 
 def addOldToken(requestData: dict, tradingAction, tokenAddress: str, pairAddress: str,
                  tokenInfoFromAPI, pairCreatedTime: int, addedBy: str):
     """
-    Handle old token flow with timeframes and EMA validation
+    Handle old token flow with timeframes, EMA, and AVWAP validation
     
     Args:
-         requestData: Request payload containing timeframes and EMA data
+         requestData: Request payload containing timeframes, EMA, and AVWAP data
          tradingAction: TradingActionEnhanced instance
          tokenAddress: Token contract address
          pairAddress: Token pair address
@@ -350,27 +359,19 @@ def addOldToken(requestData: dict, tradingAction, tokenAddress: str, pairAddress
     # Extract and validate timeframes
     timeframes = requestData.get(TradingAPIConstants.RequestParameters.TIMEFRAMES, [])
     
-    # Validate and process EMA data
-    processedEMAData = None
-    if requestData[TradingAPIConstants.Log.EMA_21_TYPE] and requestData[TradingAPIConstants.Log.EMA_34_TYPE]:
-         # Calculate pair age for validation
-         currentTime = int(time.time())
-         pairAgeInDays = (currentTime - pairCreatedTime) / 86400
-         
-         # Validate and process per-timeframe EMA data
-         isValid, errorMessage, processedEMAData = TradingAPIUtil.validateOldTokenRequirementsAndProcessEMAData(
-             pairAgeInDays,
-             requestData[TradingAPIConstants.Log.EMA_21_TYPE],
-             requestData[TradingAPIConstants.Log.EMA_34_TYPE]
-         )
-         if not isValid:
-             return {'success': False, 'error': errorMessage}
-
-    if not processedEMAData:        
-         return {'success': False, 'error': 'EMA data required for old tokens'}
-
+    # Validate EMA and AVWAP data for old token
+    avwapData = requestData.get(TradingAPIConstants.Log.AVWAP_TYPE)
+    ema21Data = requestData.get(TradingAPIConstants.Log.EMA_21_TYPE)
+    ema34Data = requestData.get(TradingAPIConstants.Log.EMA_34_TYPE)
     
-    # Process old token with validated timeframes and EMA data
+    # Use old token validation (both EMA and AVWAP required)
+    isValid, errorMessage, processedEMAData, processedAVWAPData = TradingAPIUtil.validateOldTokenRequirements(
+        ema21Data, ema34Data, avwapData
+    )
+    if not isValid:
+        return {'success': False, 'error': errorMessage}
+    
+    # Process old token with validated timeframes, EMA, and AVWAP data
     return tradingAction.addOldTokenWithTimeframes(
          tokenAddress=tokenAddress,
          pairAddress=pairAddress,
@@ -379,5 +380,6 @@ def addOldToken(requestData: dict, tradingAction, tokenAddress: str, pairAddress
          pairCreatedTime=pairCreatedTime,
          timeframes=timeframes,
          perTimeframeEMAData=processedEMAData,
-         addedBy=addedBy
+         addedBy=addedBy,
+         avwapData=processedAVWAPData
     )

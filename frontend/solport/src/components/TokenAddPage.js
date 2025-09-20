@@ -104,6 +104,15 @@ const TokenAddPage = () => {
     };
   });
 
+  // AVWAP data state - Initialize with current UTC time-based defaults
+  const [avwapData, setAvwapData] = useState(() => {
+    return {
+      '30min': { value: '', referenceTime: getMostRecentIntervalTime('30min') },
+      '1h': { value: '', referenceTime: getMostRecentIntervalTime('1h') },
+      '4h': { value: '', referenceTime: getMostRecentIntervalTime('4h') }
+    };
+  });
+
   // Generate time options for different timeframes
   const generateTimeOptions = (interval) => {
     const times = [];
@@ -216,6 +225,17 @@ const TokenAddPage = () => {
     }));
   };
 
+  // Handle AVWAP data changes
+  const handleAVWAPChange = (timeframe, field, value) => {
+    setAvwapData(prev => ({
+      ...prev,
+      [timeframe]: {
+        ...prev[timeframe],
+        [field]: value
+      }
+    }));
+  };
+
   // Validate form data
   const validateForm = () => {
     if (!tokenAddress.trim()) {
@@ -236,6 +256,14 @@ const TokenAddPage = () => {
     if (!timeframes || timeframes.length === 0) {
       setError('At least one timeframe is required');
       return false;
+    }
+
+    // Validate AVWAP data (required for all tokens)
+    for (const timeframe of ['30min', '1h', '4h']) {
+      if (!avwapData[timeframe].value) {
+        setError(`AVWAP ${timeframe.toUpperCase()} value is required for all tokens`);
+        return false;
+      }
     }
 
     if (isOldToken) {
@@ -268,7 +296,8 @@ const TokenAddPage = () => {
         tokenAddress: tokenAddress.trim(),
         pairAddress: pairAddress.trim(),
         addedBy: addedBy.trim(),
-        timeframes: timeframes
+        timeframes: timeframes,
+        avwap: avwapData  // AVWAP data is required for all tokens
       };
 
       // Add EMA data for old tokens
@@ -301,6 +330,11 @@ const TokenAddPage = () => {
             '1h': { value: '', referenceTime: getMostRecentIntervalTime('1h') },
             '4h': { value: '', referenceTime: getMostRecentIntervalTime('4h') }
           }
+        });
+        setAvwapData({
+          '30min': { value: '', referenceTime: getMostRecentIntervalTime('30min') },
+          '1h': { value: '', referenceTime: getMostRecentIntervalTime('1h') },
+          '4h': { value: '', referenceTime: getMostRecentIntervalTime('4h') }
         });
       } else {
         setError(response.data.error || 'Failed to add token');
@@ -464,8 +498,66 @@ const TokenAddPage = () => {
               )}
             </Col>
 
-            {/* Right Column - EMA Fields */}
+            {/* Right Column - AVWAP and EMA Fields */}
             <Col lg={6}>
+              {/* AVWAP Section - Required for all tokens */}
+              <div className="form-section avwap-section">
+                <div className="avwap-header">
+                  <h2>AVWAP Configuration</h2>
+                  <Badge bg="primary" className="avwap-indicator">
+                    <i className="fas fa-chart-line me-1"></i>
+                    Required for All Tokens
+                  </Badge>
+                </div>
+                <p className="avwap-description">
+                  Anchored Volume Weighted Average Price values are required for all tokens to establish reference points.
+                </p>
+
+                {/* AVWAP Configuration by Timeframe */}
+                {['30min', '1h', '4h'].map((timeframe) => (
+                  <div key={`avwap-timeframe-${timeframe}`} className="avwap-group">
+                    <h3>{timeframe.toUpperCase()}</h3>
+                    
+                    <div className="avwap-row">
+                      <div className="avwap-type-label">AVWAP:</div>
+                      <Row>
+                        <Col md={6}>
+                          <Form.Group>
+                            <Form.Label>Value</Form.Label>
+                            <Form.Control
+                              type="number"
+                              step="0.000001"
+                              value={avwapData[timeframe].value}
+                              onChange={(e) => handleAVWAPChange(timeframe, 'value', e.target.value)}
+                              placeholder="Enter AVWAP value"
+                              className="token-add-input avwap-input"
+                              required
+                            />
+                          </Form.Group>
+                        </Col>
+                        <Col md={6}>
+                          <Form.Group>
+                            <Form.Label>Reference Time</Form.Label>
+                            <Form.Select
+                              value={avwapData[timeframe].referenceTime}
+                              onChange={(e) => handleAVWAPChange(timeframe, 'referenceTime', e.target.value)}
+                              className="token-add-input avwap-input"
+                              required
+                            >
+                              {generateTimeOptions(timeframe).map((time) => (
+                                <option key={time} value={time}>
+                                  {time}
+                                </option>
+                              ))}
+                            </Form.Select>
+                          </Form.Group>
+                        </Col>
+                      </Row>
+                    </div>
+                  </div>
+                ))}
+              </div>
+
               {showEMAFields && (
                 <div className="form-section ema-section">
                   <div className="ema-header">

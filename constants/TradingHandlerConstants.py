@@ -62,6 +62,7 @@ class TradingHandlerConstants:
         CREATED_AT = 'createdat'
         LAST_UPDATED_AT = 'lastupdatedat'
         VWAP_VALUE = 'vwapvalue'
+        AVWAP_VALUE = 'avwapvalue'
     
     # emastates table columns
     class EMAStates:
@@ -90,6 +91,17 @@ class TradingHandlerConstants:
         CURRENT_VWAP = 'currentvwap'
         LAST_CANDLE_UNIX = 'lastcandleunix'
         NEXT_CANDLE_FETCH = 'nextcandlefetch'
+        CREATED_AT = 'createdat'
+        LAST_UPDATED_AT = 'lastupdatedat'
+    
+    # avwapstates table columns
+    class AVWAPStates:
+        TOKEN_ADDRESS = 'tokenaddress'
+        PAIR_ADDRESS = 'pairaddress'
+        TIMEFRAME = 'timeframe'
+        AVWAP = 'avwap'
+        LAST_UPDATED_UNIX = 'lastupdatedunix'
+        NEXT_FETCH_TIME = 'nextfetchtime'
         CREATED_AT = 'createdat'
         LAST_UPDATED_AT = 'lastupdatedat'
     
