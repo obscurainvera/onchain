@@ -15,6 +15,7 @@ class TradingAPIConstants:
         TIMEFRAMES = 'timeframes' 
         REFERENCE_TIME = 'referenceTime'
         VALUE = 'value'
+        PAIR_CREATED_TIME = 'pairCreatedTime'
 
     class Values:
         REQUIRED_TIMEFRAMES = ['30min', '1h', '4h']
@@ -23,3 +24,10 @@ class TradingAPIConstants:
         EMA_21_TYPE = 'ema21'
         EMA_34_TYPE = 'ema34'
         AVWAP_TYPE = 'avwap'
+
+    class ApiResponse:
+        """API response field names"""
+        SUCCESS = 'success'
+        ERROR = 'error'
+        CANDLES = 'candles'
+        AVWAP_DATA = 'avwapData'

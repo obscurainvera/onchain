@@ -15,157 +15,15 @@ const TokenAddPage = () => {
   const [pairAddress, setPairAddress] = useState('');
   const [tokenInfo, setTokenInfo] = useState(null);
   const [pairAge, setPairAge] = useState(null);
-  const [isOldToken, setIsOldToken] = useState(false);
-  const [showEMAFields, setShowEMAFields] = useState(false);
   const [addedBy, setAddedBy] = useState('obscurainvera');
-  const [timeframes, setTimeframes] = useState(['30min', '1h', '4h']);
+  const [timeframes, setTimeframes] = useState(['1h', '4h']);
 
-  // Get the most recent COMPLETED interval time based on current UTC time
-  const getMostRecentIntervalTime = (interval) => {
-    const now = new Date();
-    const utcHour = now.getUTCHours();
-    const utcMinute = now.getUTCMinutes();
-    
-    let targetHour, targetMinute;
-    
-    if (interval === '15m') {
-      // For 15m: Get the previous completed 15-minute candle
-      // Current 15m interval started at Math.floor(utcMinute / 15) * 15
-      // Previous completed candle is one interval back
-      const currentIntervalStart = Math.floor(utcMinute / 15) * 15;
-      if (currentIntervalStart === 0) {
-        // If we're in the first 15 minutes of the hour, go back to previous hour
-        targetHour = utcHour === 0 ? 23 : utcHour - 1;
-        targetMinute = 45;
-      } else {
-        targetHour = utcHour;
-        targetMinute = currentIntervalStart - 15;
-      }
-    } else if (interval === '30min') {
-      // For 30min: Get the previous completed 30-minute candle
-      // Current 30m interval started at Math.floor(utcMinute / 30) * 30
-      // Previous completed candle is one interval back
-      const currentIntervalStart = Math.floor(utcMinute / 30) * 30;
-      if (currentIntervalStart === 0) {
-        // If we're in the first 30 minutes of the hour, go back to previous hour
-        targetHour = utcHour === 0 ? 23 : utcHour - 1;
-        targetMinute = 30;
-      } else {
-        targetHour = utcHour;
-        targetMinute = currentIntervalStart - 30;
-      }
-    } else if (interval === '1h') {
-      // For 1h: Get the previous completed 1-hour candle
-      // We need a fully completed hour, so go back one hour
-      if (utcHour === 0) {
-        targetHour = 23;
-      } else {
-        targetHour = utcHour - 1;
-      }
-      targetMinute = 0;
-    } else if (interval === '4h') {
-      // For 4h: Get the previous completed 4-hour candle
-      // 4h intervals: 0-4, 4-8, 8-12, 12-16, 16-20, 20-24
-      const hours4h = [0, 4, 8, 12, 16, 20];
-      const currentInterval = hours4h.find((h, i) => 
-        utcHour >= h && (i === hours4h.length - 1 || utcHour < hours4h[i + 1])
-      );
-      
-      // Get the previous completed 4h interval
-      const currentIndex = hours4h.indexOf(currentInterval);
-      if (currentIndex === 0) {
-        // If we're in the first 4h interval (0-4), go back to previous day's last interval
-        targetHour = 20;
-      } else {
-        targetHour = hours4h[currentIndex - 1];
-      }
-      targetMinute = 0;
-    }
-    
-    // Convert to 12-hour format
-    const hour12 = targetHour === 0 ? 12 : targetHour > 12 ? targetHour - 12 : targetHour;
-    const ampm = targetHour < 12 ? 'AM' : 'PM';
-    return `${hour12.toString().padStart(2, '0')}:${targetMinute.toString().padStart(2, '0')} ${ampm}`;
-  };
-  
-  // EMA data state - Initialize with current UTC time-based defaults
-  const [emaData, setEmaData] = useState(() => {
-    return {
-      ema21: {
-        '30min': { value: '', referenceTime: getMostRecentIntervalTime('30min') },
-        '1h': { value: '', referenceTime: getMostRecentIntervalTime('1h') },
-        '4h': { value: '', referenceTime: getMostRecentIntervalTime('4h') }
-      },
-      ema34: {
-        '30min': { value: '', referenceTime: getMostRecentIntervalTime('30min') },
-        '1h': { value: '', referenceTime: getMostRecentIntervalTime('1h') },
-        '4h': { value: '', referenceTime: getMostRecentIntervalTime('4h') }
-      }
-    };
-  });
-
-  // AVWAP data state - Initialize with current UTC time-based defaults
-  const [avwapData, setAvwapData] = useState(() => {
-    return {
-      '30min': { value: '', referenceTime: getMostRecentIntervalTime('30min') },
-      '1h': { value: '', referenceTime: getMostRecentIntervalTime('1h') },
-      '4h': { value: '', referenceTime: getMostRecentIntervalTime('4h') }
-    };
-  });
-
-  // Generate time options for different timeframes
-  const generateTimeOptions = (interval) => {
-    const times = [];
-    
-    if (interval === '15m') {
-      // 15-minute intervals: 00:00, 00:15, 00:30, 00:45, etc.
-      for (let hour = 0; hour < 24; hour++) {
-        for (let minute = 0; minute < 60; minute += 15) {
-          const hour12 = hour === 0 ? 12 : hour > 12 ? hour - 12 : hour;
-          const ampm = hour < 12 ? 'AM' : 'PM';
-          const timeString = `${hour12.toString().padStart(2, '0')}:${minute.toString().padStart(2, '0')} ${ampm}`;
-          times.push(timeString);
-        }
-      }
-    } else if (interval === '30min') {
-      // 30-minute intervals: 00:00, 00:30, 01:00, 01:30, etc.
-      for (let hour = 0; hour < 24; hour++) {
-        for (let minute = 0; minute < 60; minute += 30) {
-          const hour12 = hour === 0 ? 12 : hour > 12 ? hour - 12 : hour;
-          const ampm = hour < 12 ? 'AM' : 'PM';
-          const timeString = `${hour12.toString().padStart(2, '0')}:${minute.toString().padStart(2, '0')} ${ampm}`;
-          times.push(timeString);
-        }
-      }
-    } else if (interval === '1h') {
-      // 1-hour intervals: 01:00, 02:00, 03:00, etc.
-      for (let hour = 0; hour < 24; hour++) {
-        const hour12 = hour === 0 ? 12 : hour > 12 ? hour - 12 : hour;
-        const ampm = hour < 12 ? 'AM' : 'PM';
-        const timeString = `${hour12.toString().padStart(2, '0')}:00 ${ampm}`;
-        times.push(timeString);
-      }
-    } else if (interval === '4h') {
-      // 4-hour intervals: 12:00 AM, 04:00 AM, 08:00 AM, 12:00 PM, 04:00 PM, 08:00 PM
-      const hours4h = [0, 4, 8, 12, 16, 20];
-      for (const hour of hours4h) {
-        const hour12 = hour === 0 ? 12 : hour > 12 ? hour - 12 : hour;
-        const ampm = hour < 12 ? 'AM' : 'PM';
-        const timeString = `${hour12.toString().padStart(2, '0')}:00 ${ampm}`;
-        times.push(timeString);
-      }
-    }
-    
-    return times;
-  };
 
   // Check if token address is valid and fetch token info
   const handleTokenAddressChange = async (address) => {
     setTokenAddress(address);
     setTokenInfo(null);
     setPairAge(null);
-    setIsOldToken(false);
-    setShowEMAFields(false);
     setError(null);
 
     if (!address || address.length < 32) return;
@@ -186,10 +44,6 @@ const TokenAddPage = () => {
         const ageInDays = (currentTime - pairCreatedTime) / (1000 * 60 * 60 * 24);
         setPairAge(ageInDays);
         
-        const isOld = ageInDays > 7;
-        setIsOldToken(isOld);
-        setShowEMAFields(isOld);
-        
         // Auto-fill pair address from API response
         if (tokenData.pairAddress) {
           setPairAddress(tokenData.pairAddress);
@@ -209,31 +63,6 @@ const TokenAddPage = () => {
     } finally {
       setLoading(false);
     }
-  };
-
-  // Handle EMA data changes
-  const handleEMAChange = (emaType, timeframe, field, value) => {
-    setEmaData(prev => ({
-      ...prev,
-      [emaType]: {
-        ...prev[emaType],
-        [timeframe]: {
-          ...prev[emaType][timeframe],
-          [field]: value
-        }
-      }
-    }));
-  };
-
-  // Handle AVWAP data changes
-  const handleAVWAPChange = (timeframe, field, value) => {
-    setAvwapData(prev => ({
-      ...prev,
-      [timeframe]: {
-        ...prev[timeframe],
-        [field]: value
-      }
-    }));
   };
 
   // Validate form data
@@ -258,26 +87,6 @@ const TokenAddPage = () => {
       return false;
     }
 
-    // Validate AVWAP data (required for all tokens)
-    for (const timeframe of ['30min', '1h', '4h']) {
-      if (!avwapData[timeframe].value) {
-        setError(`AVWAP ${timeframe.toUpperCase()} value is required for all tokens`);
-        return false;
-      }
-    }
-
-    if (isOldToken) {
-      // Validate EMA data
-      for (const emaType of ['ema21', 'ema34']) {
-        for (const timeframe of ['30min', '1h', '4h']) {
-          if (!emaData[emaType][timeframe].value) {
-            setError(`${emaType.toUpperCase()} ${timeframe.toUpperCase()} value is required for old tokens`);
-            return false;
-          }
-        }
-      }
-    }
-
     return true;
   };
 
@@ -296,15 +105,8 @@ const TokenAddPage = () => {
         tokenAddress: tokenAddress.trim(),
         pairAddress: pairAddress.trim(),
         addedBy: addedBy.trim(),
-        timeframes: timeframes,
-        avwap: avwapData  // AVWAP data is required for all tokens
+        timeframes: timeframes
       };
-
-      // Add EMA data for old tokens
-      if (isOldToken) {
-        requestData.ema21 = emaData.ema21;
-        requestData.ema34 = emaData.ema34;
-      }
 
       const response = await axios.post(`${API_BASE_URL}/api/tokens/add`, requestData);
 
@@ -314,28 +116,9 @@ const TokenAddPage = () => {
         setTokenAddress('');
         setPairAddress('');
         setAddedBy('obscurainvera');
-        setTimeframes(['30min', '1h', '4h']);
+        setTimeframes(['1h', '4h']);
         setTokenInfo(null);
         setPairAge(null);
-        setIsOldToken(false);
-        setShowEMAFields(false);
-        setEmaData({
-          ema21: {
-            '30min': { value: '', referenceTime: getMostRecentIntervalTime('30min') },
-            '1h': { value: '', referenceTime: getMostRecentIntervalTime('1h') },
-            '4h': { value: '', referenceTime: getMostRecentIntervalTime('4h') }
-          },
-          ema34: {
-            '30min': { value: '', referenceTime: getMostRecentIntervalTime('30min') },
-            '1h': { value: '', referenceTime: getMostRecentIntervalTime('1h') },
-            '4h': { value: '', referenceTime: getMostRecentIntervalTime('4h') }
-          }
-        });
-        setAvwapData({
-          '30min': { value: '', referenceTime: getMostRecentIntervalTime('30min') },
-          '1h': { value: '', referenceTime: getMostRecentIntervalTime('1h') },
-          '4h': { value: '', referenceTime: getMostRecentIntervalTime('4h') }
-        });
       } else {
         setError(response.data.error || 'Failed to add token');
       }
@@ -445,7 +228,7 @@ const TokenAddPage = () => {
                       ))}
                     </div>
                     <Form.Text className="text-muted">
-                      Select timeframes for token tracking. Default: 30MIN, 1H, 4H
+                      Select timeframes for token tracking. Default: 1H, 4H
                     </Form.Text>
                   </Form.Group>
 
@@ -467,11 +250,6 @@ const TokenAddPage = () => {
                           <span className="label">Pair Age:</span>
                           <span className="value">
                             {pairAge.toFixed(1)} days
-                            {isOldToken && (
-                              <Badge bg="warning" className="ms-2 old-token-badge">
-                                Old Token - EMA Required
-                              </Badge>
-                            )}
                           </span>
                         </div>
                       )}
@@ -498,164 +276,8 @@ const TokenAddPage = () => {
               )}
             </Col>
 
-            {/* Right Column - AVWAP and EMA Fields */}
+            {/* Right Column - Submit Section */}
             <Col lg={6}>
-              {/* AVWAP Section - Required for all tokens */}
-              <div className="form-section avwap-section">
-                <div className="avwap-header">
-                  <h2>AVWAP Configuration</h2>
-                  <Badge bg="primary" className="avwap-indicator">
-                    <i className="fas fa-chart-line me-1"></i>
-                    Required for All Tokens
-                  </Badge>
-                </div>
-                <p className="avwap-description">
-                  Anchored Volume Weighted Average Price values are required for all tokens to establish reference points.
-                </p>
-
-                {/* AVWAP Configuration by Timeframe */}
-                {['30min', '1h', '4h'].map((timeframe) => (
-                  <div key={`avwap-timeframe-${timeframe}`} className="avwap-group">
-                    <h3>{timeframe.toUpperCase()}</h3>
-                    
-                    <div className="avwap-row">
-                      <div className="avwap-type-label">AVWAP:</div>
-                      <Row>
-                        <Col md={6}>
-                          <Form.Group>
-                            <Form.Label>Value</Form.Label>
-                            <Form.Control
-                              type="number"
-                              step="0.000001"
-                              value={avwapData[timeframe].value}
-                              onChange={(e) => handleAVWAPChange(timeframe, 'value', e.target.value)}
-                              placeholder="Enter AVWAP value"
-                              className="token-add-input avwap-input"
-                              required
-                            />
-                          </Form.Group>
-                        </Col>
-                        <Col md={6}>
-                          <Form.Group>
-                            <Form.Label>Reference Time</Form.Label>
-                            <Form.Select
-                              value={avwapData[timeframe].referenceTime}
-                              onChange={(e) => handleAVWAPChange(timeframe, 'referenceTime', e.target.value)}
-                              className="token-add-input avwap-input"
-                              required
-                            >
-                              {generateTimeOptions(timeframe).map((time) => (
-                                <option key={time} value={time}>
-                                  {time}
-                                </option>
-                              ))}
-                            </Form.Select>
-                          </Form.Group>
-                        </Col>
-                      </Row>
-                    </div>
-                  </div>
-                ))}
-              </div>
-
-              {showEMAFields && (
-                <div className="form-section ema-section">
-                  <div className="ema-header">
-                    <h2>EMA Configuration</h2>
-                    <Badge bg="info" className="old-token-indicator">
-                      <i className="fas fa-clock me-1"></i>
-                      Old Token Detected
-                    </Badge>
-                  </div>
-                  <p className="ema-description">
-                    This token is older than 7 days. Please provide EMA values for accurate tracking.
-                  </p>
-
-                  {/* EMA Configuration by Timeframe */}
-                  {['30min', '1h', '4h'].map((timeframe) => (
-                    <div key={`timeframe-${timeframe}`} className="ema-group">
-                      <h3>{timeframe.toUpperCase()}</h3>
-                      
-                      {/* EMA21 Row */}
-                      <div className="ema-row">
-                        <div className="ema-type-label">EMA 21:</div>
-                        <Row>
-                          <Col md={6}>
-                            <Form.Group>
-                              <Form.Label>Value</Form.Label>
-                              <Form.Control
-                                type="number"
-                                step="0.000001"
-                                value={emaData.ema21[timeframe].value}
-                                onChange={(e) => handleEMAChange('ema21', timeframe, 'value', e.target.value)}
-                                placeholder="Enter EMA21 value"
-                                className="token-add-input ema-input"
-                                required={isOldToken}
-                              />
-                            </Form.Group>
-                          </Col>
-                          <Col md={6}>
-                            <Form.Group>
-                              <Form.Label>Reference Time</Form.Label>
-                              <Form.Select
-                                value={emaData.ema21[timeframe].referenceTime}
-                                onChange={(e) => handleEMAChange('ema21', timeframe, 'referenceTime', e.target.value)}
-                                className="token-add-input ema-input"
-                                required={isOldToken}
-                              >
-                                {generateTimeOptions(timeframe).map((time) => (
-                                  <option key={time} value={time}>
-                                    {time}
-                                  </option>
-                                ))}
-                              </Form.Select>
-                            </Form.Group>
-                          </Col>
-                        </Row>
-                      </div>
-
-                      {/* EMA34 Row */}
-                      <div className="ema-row">
-                        <div className="ema-type-label">EMA 34:</div>
-                        <Row>
-                          <Col md={6}>
-                            <Form.Group>
-                              <Form.Label>Value</Form.Label>
-                              <Form.Control
-                                type="number"
-                                step="0.000001"
-                                value={emaData.ema34[timeframe].value}
-                                onChange={(e) => handleEMAChange('ema34', timeframe, 'value', e.target.value)}
-                                placeholder="Enter EMA34 value"
-                                className="token-add-input ema-input"
-                                required={isOldToken}
-                              />
-                            </Form.Group>
-                          </Col>
-                          <Col md={6}>
-                            <Form.Group>
-                              <Form.Label>Reference Time</Form.Label>
-                              <Form.Select
-                                value={emaData.ema34[timeframe].referenceTime}
-                                onChange={(e) => handleEMAChange('ema34', timeframe, 'referenceTime', e.target.value)}
-                                className="token-add-input ema-input"
-                                required={isOldToken}
-                              >
-                                {generateTimeOptions(timeframe).map((time) => (
-                                  <option key={time} value={time}>
-                                    {time}
-                                  </option>
-                                ))}
-                              </Form.Select>
-                            </Form.Group>
-                          </Col>
-                        </Row>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              )}
-
               {/* Submit Section */}
               <div className="submit-section">
                 <Button

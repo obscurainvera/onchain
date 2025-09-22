@@ -100,6 +100,8 @@ class TradingHandlerConstants:
         PAIR_ADDRESS = 'pairaddress'
         TIMEFRAME = 'timeframe'
         AVWAP = 'avwap'
+        CUMULATIVE_PV = 'cumulativepv'
+        CUMULATIVE_VOLUME = 'cumulativevolume'
         LAST_UPDATED_UNIX = 'lastupdatedunix'
         NEXT_FETCH_TIME = 'nextfetchtime'
         CREATED_AT = 'createdat'

@@ -33,7 +33,7 @@ USAGE:
 - Maintains consistency with existing processor patterns
 """
 
-from typing import Dict, Any, List
+from typing import Dict, Any, List, TYPE_CHECKING
 from decimal import Decimal
 import time
 from logs.logger import get_logger
@@ -41,6 +41,13 @@ from constants.TradingHandlerConstants import TradingHandlerConstants
 from constants.TradingAPIConstants import TradingAPIConstants
 from actions.TradingActionUtil import TradingActionUtil
 from utils.CommonUtil import CommonUtil
+from utils.IndicatorConstants import IndicatorConstants
+from constants.TradingConstants import TimeframeConstants, TokenFlowConstants
+from scheduler.SchedulerConstants import CandleDataKeys
+from api.trading.request.AVWAPState import AVWAPState
+
+if TYPE_CHECKING:
+    from api.trading.request import TrackedToken, TimeframeRecord
 
 logger = get_logger(__name__)
 
@@ -48,143 +55,142 @@ logger = get_logger(__name__)
 class AVWAPProcessor:
     """Processor for AVWAP (Anchored Volume Weighted Average Price) operations"""
     
-    def __init__(self, trading_handler):
+    def __init__(self, trading_handler, moralis_handler=None):
         """
-        Initialize AVWAP processor with trading handler
+        Initialize AVWAP processor with required dependencies
         
         Args:
             trading_handler: TradingHandler instance for database operations
+            moralis_handler: MoralisServiceHandler instance for data fetching (optional)
         """
         self.trading_handler = trading_handler
+        self.moralis_handler = moralis_handler
     
-    def setAVWAPForTokenFromAPI(self, tokenAddress: str, pairAddress: str, 
-                               avwapData: Dict, allCandles: Dict[str, List[Dict]]) -> Dict[str, Any]:
-        """
-        Process user-provided AVWAP data and persist to database
-        
-        This method handles AVWAP data from the API request and:
-        1. Validates the AVWAP data structure
-        2. Creates avwapstates records for each timeframe
-        3. Updates ohlcvdetails.avwapvalue for reference candles
-        4. Calculates proper next fetch times
-        
-        Args:
-            tokenAddress: Token contract address
-            pairAddress: Pair contract address
-            avwapData: AVWAP data from API request in format:
-                {
-                    "1h": {"value": "10.5", "referenceTime": "1234567890"},
-                    "30min": {"value": "10.3", "referenceTime": "1234567890"}
-                }
-            allCandles: Pre-loaded candles for all timeframes
-            
-        Returns:
-            Dict with success status and any error messages
-        """
+    
+    
+    
+    
+   
+    
+    
+    def calculateAVWAPInMemory(self, timeframeRecord, tokenAddress: str, pairAddress: str) -> None:
         try:
-            logger.info(f"Processing AVWAP data for token {tokenAddress}")
+            if not timeframeRecord.ohlcvDetails:
+                logger.warning(f"No candles available for AVWAP calculation: {tokenAddress} {timeframeRecord.timeframe}")
+                return
             
-            if not avwapData:
-                logger.warning(f"No AVWAP data provided for {tokenAddress}")
-                return {'success': True, 'message': 'No AVWAP data to process'}
+            logger.info(f"Processing AVWAP for {tokenAddress} {timeframeRecord.timeframe} with {len(timeframeRecord.ohlcvDetails)} candles")
             
-            # Collections for batch operations
-            avwapStateData = []
-            avwapCandleUpdateData = []
+            # Calculate cumulative values
+            cumulativePV = 0.0
+            cumulativeVolume = 0.0
+            lastUpdatedUnix = 0
             
-            # Process each timeframe that has both candle data and user-provided AVWAP data
-            for timeframe in avwapData.keys():
-                if timeframe not in allCandles:
-                    logger.debug(f"Skipping {timeframe} - no candle data available")
-                    continue
-                    
-                candles = allCandles[timeframe]
-                timeframeAVWAPData = avwapData[timeframe]
+            for candle in timeframeRecord.ohlcvDetails:
+                # Calculate typical price (HLC/3)
+                typicalPrice = (candle.highPrice + candle.lowPrice + candle.closePrice) / 3.0
+                priceVolume = typicalPrice * candle.volume
                 
-                logger.info(f"Processing AVWAP for timeframe {timeframe} with {len(candles)} candles")
+                # Update cumulative values
+                cumulativePV += priceVolume
+                cumulativeVolume += candle.volume
+                lastUpdatedUnix = max(lastUpdatedUnix, candle.unixTime)
                 
-                # Extract AVWAP value and reference time
-                try:
-                    avwapValue = Decimal(str(timeframeAVWAPData[TradingAPIConstants.RequestParameters.VALUE]))
-                    referenceTime = int(timeframeAVWAPData[TradingAPIConstants.RequestParameters.REFERENCE_TIME])
-                except (KeyError, ValueError, TypeError) as e:
-                    logger.error(f"Invalid AVWAP data for {timeframe}: {e}")
-                    continue
-                
-                logger.info(f"Setting AVWAP for {tokenAddress} {timeframe}: value={avwapValue} at timestamp {referenceTime}")
-                
-                # Prepare AVWAP state record
-                avwapStateRecord = self.collectDataForAVWAPStateQuery(
-                    tokenAddress, pairAddress, timeframe, avwapValue, referenceTime
-                )
-                avwapStateData.append(avwapStateRecord)
-                
-                # Prepare AVWAP candle update (UPDATE will handle if candle exists or not)
-                avwapCandleUpdate = self.collectDataForAVWAPCandleUpdate(
-                    tokenAddress, timeframe, referenceTime, avwapValue
-                )
-                avwapCandleUpdateData.append(avwapCandleUpdate)
-                logger.info(f"Prepared AVWAP candle update for {tokenAddress} {timeframe} at {referenceTime}")
+                # Calculate AVWAP for this candle
+                if cumulativeVolume > 0:
+                    currentAVWAP = cumulativePV / cumulativeVolume
+                    candle.updateAVWAPValue(currentAVWAP)
+        
             
-            # Execute batch database operations via handler
-            if avwapStateData or avwapCandleUpdateData:
-                logger.info(f"Executing AVWAP operations: {len(avwapStateData)} state records, {len(avwapCandleUpdateData)} candle updates")
-                self.trading_handler.batchUpdateAVWAPData(avwapStateData, avwapCandleUpdateData)
-            else:
-                logger.warning(f"No valid AVWAP data to persist for {tokenAddress}")
+            timeframeSeconds = CommonUtil.getTimeframeSeconds(timeframeRecord.timeframe)
+            nextFetchTime = lastUpdatedUnix + timeframeSeconds if lastUpdatedUnix else None
             
-            return {'success': True}
+            timeframeRecord.avwapState = AVWAPState(
+                tokenAddress=tokenAddress,
+                pairAddress=pairAddress,
+                timeframe=timeframeRecord.timeframe,
+                avwap=cumulativePV / cumulativeVolume if cumulativeVolume > 0 else None,
+                cumulativePV=cumulativePV,
+                cumulativeVolume=cumulativeVolume,
+                lastUpdatedUnix=lastUpdatedUnix,
+                nextFetchTime=nextFetchTime
+            )
+            
+            logger.info(f"Calculated AVWAP for {tokenAddress} {timeframeRecord.timeframe}: {timeframeRecord.avwapState.avwap:.8f}")
             
         except Exception as e:
-            logger.error(f"Error processing AVWAP data for token {tokenAddress}: {e}")
-            return {'success': False, 'error': str(e)}
-    
-    def collectDataForAVWAPStateQuery(self, tokenAddress: str, pairAddress: str, 
-                                      timeframe: str, avwapValue: Decimal, 
-                                      referenceUnixTime: int) -> Dict:
-        """
-        Prepare AVWAP state data dictionary for database operations
+            logger.error(f"Error calculating AVWAP in memory for {tokenAddress} {timeframeRecord.timeframe}: {e}")
+
+    def calculateAVWAPForAllTrackedTokens(self, trackedTokens: List['TrackedToken']) -> None:
         
-        Args:
-            tokenAddress: Token contract address
-            pairAddress: Pair contract address  
-            timeframe: Timeframe (30min, 1h, 4h)
-            avwapValue: AVWAP value as Decimal
-            referenceUnixTime: Reference timestamp
+        try:
+            totalProcessed = 0
             
-        Returns:
-            Dict formatted for database insertion
-        """
-        timeframeInSeconds = CommonUtil.getTimeframeSeconds(timeframe)
-        nextFetchTime = referenceUnixTime + timeframeInSeconds
-        
-        return {
-            TradingHandlerConstants.AVWAPStates.TOKEN_ADDRESS: tokenAddress,
-            TradingHandlerConstants.AVWAPStates.PAIR_ADDRESS: pairAddress,
-            TradingHandlerConstants.AVWAPStates.TIMEFRAME: timeframe,
-            TradingHandlerConstants.AVWAPStates.AVWAP: avwapValue,
-            TradingHandlerConstants.AVWAPStates.LAST_UPDATED_UNIX: referenceUnixTime,
-            TradingHandlerConstants.AVWAPStates.NEXT_FETCH_TIME: nextFetchTime
-        }
-    
-    def collectDataForAVWAPCandleUpdate(self, tokenAddress: str, timeframe: str, 
-                                        unixtime: int, avwapValue: Decimal) -> Dict:
-        """
-        Prepare AVWAP candle update data dictionary
-        
-        Args:
-            tokenAddress: Token contract address
-            timeframe: Timeframe (30min, 1h, 4h)
-            unixtime: Unix timestamp of the candle
-            avwapValue: AVWAP value as Decimal
+            for trackedToken in trackedTokens:
+                for timeframeRecord in trackedToken.timeframeRecords:
+                    if timeframeRecord.avwapState and timeframeRecord.ohlcvDetails:
+                        # Calculate AVWAP incrementally using existing state
+                        self.calculateAVWAPIncrementalWithPOJOs(
+                            timeframeRecord, trackedToken.tokenAddress, trackedToken.pairAddress
+                        )
+                        totalProcessed += 1
             
-        Returns:
-            Dict formatted for candle update
-        """
-        return {
-            TradingHandlerConstants.OHLCVDetails.TOKEN_ADDRESS: tokenAddress,
-            TradingHandlerConstants.OHLCVDetails.TIMEFRAME: timeframe,
-            TradingHandlerConstants.OHLCVDetails.UNIX_TIME: unixtime,
-            TradingHandlerConstants.OHLCVDetails.AVWAP_VALUE: avwapValue
-        }
+            logger.info(f"Processed AVWAP calculations for {totalProcessed} timeframe records using POJOs")
+        
+        except Exception as e:
+            logger.error(f"Error processing AVWAP calculations with POJOs: {e}")
+
+    def calculateAVWAPIncrementalWithPOJOs(self, timeframeRecord, tokenAddress: str, pairAddress: str) -> None:
+        try:
+            avwapState = timeframeRecord.avwapState
+            candles = timeframeRecord.ohlcvDetails
+            
+            if not avwapState or not candles:
+                logger.warning(f"No AVWAP state or candles available for {tokenAddress} {timeframeRecord.timeframe}")
+                return
+            
+            # Sort candles by unixTime to ensure chronological processing
+            candles.sort(key=lambda x: x.unixTime)
+            
+            # Initialize cumulative values from existing AVWAP state
+            currentCumulativePV = avwapState.cumulativePV or 0.0
+            currentCumulativeVolume = avwapState.cumulativeVolume or 0.0
+            latestUnix = avwapState.lastUpdatedUnix or 0
+            
+            # Process only new candles (after lastUpdatedUnix)
+            newCandles = [c for c in candles if c.unixTime > latestUnix]
+            
+            if not newCandles:
+                logger.debug(f"No new candles for AVWAP update: {tokenAddress} {timeframeRecord.timeframe}")
+                return
+            
+            logger.info(f"Processing {len(newCandles)} new candles for AVWAP: {tokenAddress} {timeframeRecord.timeframe}")
+            
+            # Process new candles incrementally
+            for candle in newCandles:
+                # Calculate typical price (HLC/3) for AVWAP
+                typicalPrice = (candle.highPrice + candle.lowPrice + candle.closePrice) / 3.0
+                priceVolume = typicalPrice * candle.volume
+                
+                # Update cumulative values
+                currentCumulativePV += priceVolume
+                currentCumulativeVolume += candle.volume
+                
+                # Calculate current AVWAP and update the candle
+                if currentCumulativeVolume > 0:
+                    currentAVWAP = currentCumulativePV / currentCumulativeVolume
+                    candle.updateAVWAPValue(currentAVWAP)
+                    latestUnix = candle.unixTime
+            
+            # Update AVWAPState POJO with new values
+            avwapState.avwap = currentCumulativePV / currentCumulativeVolume if currentCumulativeVolume > 0 else 0.0
+            avwapState.cumulativePV = currentCumulativePV
+            avwapState.cumulativeVolume = currentCumulativeVolume
+            avwapState.lastUpdatedUnix = latestUnix
+            avwapState.nextFetchTime = latestUnix + CommonUtil.getTimeframeSeconds(timeframeRecord.timeframe)
+            
+            logger.info(f"Updated AVWAP for {tokenAddress} {timeframeRecord.timeframe}: {avwapState.avwap:.8f} (processed {len(newCandles)} new candles)")
+            
+        except Exception as e:
+            logger.error(f"Error calculating AVWAP incrementally with POJOs for {tokenAddress} {timeframeRecord.timeframe}: {e}")
     

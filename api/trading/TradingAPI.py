@@ -1,14 +1,14 @@
 from config.Config import get_config
 from flask import jsonify, Blueprint, request
-from constants.TradingAPIConstants import TradingAPIConstants
-from constants.TradingHandlerConstants import TradingHandlerConstants
 from database.operations.PortfolioDB import PortfolioDB
 from database.trading.TradingHandler import TradingHandler
 from actions.TradingActionEnhanced import TradingActionEnhanced
 from logs.logger import get_logger
 from actions.DexscrennerAction import DexScreenerAction
-from api.trading.TradingAPIUtil import TradingAPIUtil
-from constants.TradingConstants import TimeframeConstants, TokenFlowConstants, ValidationMessages
+from api.trading.request import AddTokenRequest, TokenInfo
+from api.trading.response import AddTokenResponse
+from api.trading.validation import TokenRequestValidator
+from constants.TradingHandlerConstants import TradingHandlerConstants
 import time
 
 from scheduler.CredentialResetScheduler import CredentialResetScheduler
@@ -22,183 +22,144 @@ trading_bp = Blueprint('trading', __name__)
 db = PortfolioDB()
 trading_handler = TradingHandler(db.conn_manager)
 
+
 @trading_bp.route('/api/tokens/add', methods=['POST', 'OPTIONS'])
 def addToken():
     """
     Add Token API - POST /api/tokens/add
     
-    REQUEST BODY (New tokens - with timeframes):
+    REQUEST BODY:
     {
-         "tokenAddress": "So11111111111111111111111111111111111111112",
-         "pairAddress": "4w2cysotX6czaUGmmWg13hDpY4QEMG2CzeKYEQyK9Ama",
-         "timeframes": ["30min", "1h", "4h"]
-    }
-    
-    REQUEST BODY (Old tokens - With timeframes and Per-timeframe EMA):
-    {
-         "tokenAddress": "So11111111111111111111111111111111111111112",
-         "pairAddress": "4w2cysotX6czaUGmmWg13hDpY4QEMG2CzeKYEQyK9Ama",
-         "timeframes": ["30min", "1h", "4h"],
-         "ema21": {
-             "30min": {"value": 1.25, "referenceTime": "10:30 AM"},
-             "1h": {"value": 1.28, "referenceTime": "10 AM"},
-             "4h": {"value": 1.30, "referenceTime": "8 AM"}
-         },
-         "ema34": {
-             "30min": {"value": 1.22, "referenceTime": "10:30 AM"},
-             "1h": {"value": 1.24, "referenceTime": "10 AM"},
-             "4h": {"value": 1.26, "referenceTime": "8 AM"}
-         }
+        "tokenAddress": "So11111111111111111111111111111111111111112",
+        "pairAddress": "4w2cysotX6czaUGmmWg13hDpY4QEMG2CzeKYEQyK9Ama",
+        "timeframes": ["30min", "1h", "4h"],
+        "addedBy": "user@example.com"
     }
     """
     if request.method == 'OPTIONS':
-         return jsonify({}), 200
+        return jsonify({}), 200
 
     try:
+        # Step 1: Get and validate request data
+        data = request.get_json()
+        isValid, errorMessage = TokenRequestValidator.validateRequestData(data)
+        if not isValid:
+            return jsonify(AddTokenResponse.error_response(errorMessage).to_dict()), 400
+
+        # Step 2: Convert to POJO
+        addTokenRequest = AddTokenRequest.from_dict(data)
         
-         data = request.get_json()
-         isValid, errorMessage, requestData = TradingAPIUtil.validateRequestData(data)
-         if not isValid:
-             return jsonify({'success': False, 'error': errorMessage}), 400
+        # Step 3: Check if token is already active        
+        existingTokens = trading_handler.getActiveTokens()
+        for existing in existingTokens:
+            if existing[TradingHandlerConstants.TrackedTokens.TOKEN_ADDRESS] == addTokenRequest.tokenAddress:
+                return jsonify(AddTokenResponse.error_response('Token {addTokenRequest.tokenAddress} is already being tracked'
+                ).to_dict()), 409
 
-         tokenAddress = requestData[TradingAPIConstants.RequestParameters.TOKEN_ADDRESS]
-         pairAddress = requestData[TradingAPIConstants.RequestParameters.PAIR_ADDRESS]
-         addedBy = requestData[TradingAPIConstants.RequestParameters.ADDED_BY]
+        # Step 4: Get token information from DexScreener API        
+        dexAction = DexScreenerAction()
+        tokenInfoFromAPI = dexAction.getTokenPrice(addTokenRequest.tokenAddress)
+        
+        if not tokenInfoFromAPI:
+            return jsonify(AddTokenResponse.error_response(
+                'Token not found on DexScreener or no valid trading pairs available'
+            ).to_dict()), 404
 
-         # Step 2: Check if token already exists in tracked tokens
-         existingTokens = trading_handler.getActiveTokens()
-         for existing in existingTokens:
-             if existing[TradingHandlerConstants.TrackedTokens.TOKEN_ADDRESS] == tokenAddress:
-                 return jsonify({
-                     'success': False,
-                     'error': f'Token {tokenAddress} is already being tracked',
-                     'conflictType': 'ALREADY_ACTIVE'
-                 }), 409
+        # Step 5: Convert DexScreener response to TokenInfo POJO        
+        tokenInfo = TokenInfo(
+            symbol=tokenInfoFromAPI.symbol,
+            name=tokenInfoFromAPI.name,
+            pairCreatedAt=tokenInfoFromAPI.pairCreatedAt,
+            price=tokenInfoFromAPI.price     
+        )
 
-         # Step 3: Get token information from DexScreener API to check pair age
-         dexAction = DexScreenerAction()
-         tokenInfoFromAPI = dexAction.getTokenPrice(tokenAddress)
-         
-         if not tokenInfoFromAPI:
-             return jsonify({
-                 'success': False,
-                 'error': 'Token not found on DexScreener or no valid trading pairs available'
-             }), 404
+        logger.info(f"Processing token {tokenInfo.symbol} (age: {tokenInfo.pairAgeInDays:.1f} days)")
 
-         # Step 4: Calculate pair age to determine flow
-         currentTime = int(time.time())
-         pairCreatedTime = tokenInfoFromAPI.pairCreatedAt // 1000  # ms to seconds
-         pairAgeInDays = (currentTime - pairCreatedTime) / 86400
+        tradingAction = TradingActionEnhanced(db)
+        response = tradingAction.addTokenForTracking(addTokenRequest, tokenInfo)
 
-         logger.info(f"Processing token {tokenInfoFromAPI.symbol} (age: {pairAgeInDays:.1f} days)")
-
-         # Step 5: Initialize TradingActionEnhanced for token processing
-         tradingAction = TradingActionEnhanced(db)
-
-         # Step 6: Route based on pair age
-         if pairAgeInDays <= TokenFlowConstants.NEW_TOKEN_MAX_AGE_DAYS:
-             # New token flow - requires timeframes array
-             tokenAddition = addNewToken(
-                 requestData, tradingAction, tokenAddress, pairAddress, 
-                 tokenInfoFromAPI, pairCreatedTime, addedBy
-             )
-         else:
-             # Old token flow (>7 days) - requires timeframes and per-timeframe EMA data
-             tokenAddition = addOldToken(
-                 requestData, tradingAction, tokenAddress, pairAddress, 
-                 tokenInfoFromAPI, pairCreatedTime, addedBy
-             )
-
-         # Step 7: Return appropriate response
-         if tokenAddition['success']:
-             successResponse = TradingAPIUtil.formatSuccessResponse(
-                 tokenAddition, tokenAddress, pairAddress, pairAgeInDays
-             )
-             return jsonify(successResponse), 201
-         else:
-             errorResponse, statusCode = TradingAPIUtil.formatErrorResponse(
-                 tokenAddition.get('error', 'Unknown error occurred')
-             )
-             return jsonify(errorResponse), statusCode
+        if response.success:
+            return jsonify(response.to_dict()), 201
+        else:
+            return jsonify(response.to_dict()), 500
 
     except Exception as e:
-         logger.error(f"Error in addToken API: {str(e)}", exc_info=True)
-         return jsonify({
-             'success': False,
-             'error': f'Internal server error: {str(e)}'
-         }), 500
+        logger.error(f"Error in addToken API: {str(e)}", exc_info=True)
+        return jsonify(AddTokenResponse.error_response(
+            f'Internal server error: {str(e)}'
+        ).to_dict()), 500
 
 
 @trading_bp.route('/api/tokens/disable', methods=['POST', 'OPTIONS'])
 def disableToken():
-   """
-   Disable Token API - POST /api/tokens/disable
-  
-   REQUEST BODY:
-   {
+    """
+    Disable Token API - POST /api/tokens/disable
+    
+    REQUEST BODY:
+    {
         "tokenAddress": "So11111111111111111111111111111111111111112",
         "reason": "Low volume",
         "disabledBy": "admin@example.com"
-   }
-   """
-   if request.method == 'OPTIONS':
-       return jsonify({}), 200
-  
-   try:
-       data = request.get_json()
-       if not data:
-           return jsonify({
-               'success': False,
-               'error': 'No JSON data provided'
-           }), 400
-      
-       # Extract and validate required fields
-       token_address = data.get('tokenAddress', '').strip()
-       reason = data.get('reason', '').strip()
-       disabled_by = data.get('disabledBy', 'api_user')
-      
-       # Validate required fields
-       if not token_address:
-           return jsonify({
-               'success': False,
-               'error': 'Missing required field: tokenAddress'
-           }), 400
-      
-       # Disable the token using optimized database operation
-       logger.info(f"Disabling token: {token_address} - Reason: {reason}")
-       
-       result = trading_handler.disableToken(
-           tokenAddress=token_address,
-           disabledBy=disabled_by,
-           reason=reason
-       )
-       
-       if not result['success']:
-           if 'not found' in result['error'].lower():
-               return jsonify({
-                   'success': False,
-                   'error': f'Token {token_address} not found or already disabled'
-               }), 404
-           else:
-               return jsonify({
-                   'success': False,
-                   'error': f'Failed to disable token: {result["error"]}'
-               }), 500
-       
-       token_info = result['tokenInfo']
-       logger.info(f"Successfully disabled token {token_info['symbol']} ({token_address})")
-       
-       return jsonify({
-           'success': True,
-           'tokenAddress': token_address,
-           'symbol': token_info['symbol'],
-           'name': token_info['name'],
-           'reason': reason,
-           'disabledBy': disabled_by,
-           'message': f'Token {token_info["symbol"]} disabled successfully'
-       }), 200
-       
-   except Exception as e:
+    }
+    """
+    if request.method == 'OPTIONS':
+        return jsonify({}), 200
+    
+    try:
+        data = request.get_json()
+        if not data:
+            return jsonify({
+                'success': False,
+                'error': 'No JSON data provided'
+            }), 400
+        
+        # Extract and validate required fields
+        token_address = data.get('tokenAddress', '').strip()
+        reason = data.get('reason', '').strip()
+        disabled_by = data.get('disabledBy', 'api_user')
+        
+        # Validate required fields
+        if not token_address:
+            return jsonify({
+                'success': False,
+                'error': 'Missing required field: tokenAddress'
+            }), 400
+        
+        # Disable the token using optimized database operation
+        logger.info(f"Disabling token: {token_address} - Reason: {reason}")
+        
+        result = trading_handler.disableToken(
+            tokenAddress=token_address,
+            disabledBy=disabled_by,
+            reason=reason
+        )
+        
+        if not result['success']:
+            if 'not found' in result['error'].lower():
+                return jsonify({
+                    'success': False,
+                    'error': f'Token {token_address} not found or already disabled'
+                }), 404
+            else:
+                return jsonify({
+                    'success': False,
+                    'error': f'Failed to disable token: {result["error"]}'
+                }), 500
+        
+        token_info = result['tokenInfo']
+        logger.info(f"Successfully disabled token {token_info['symbol']} ({token_address})")
+        
+        return jsonify({
+            'success': True,
+            'tokenAddress': token_address,
+            'symbol': token_info['symbol'],
+            'name': token_info['name'],
+            'reason': reason,
+            'disabledBy': disabled_by,
+            'message': f'Token {token_info["symbol"]} disabled successfully'
+        }), 200
+        
+    except Exception as e:
         logger.error(f"Error in disableToken API: {str(e)}", exc_info=True)
         return jsonify({
             'success': False,
@@ -208,18 +169,21 @@ def disableToken():
 
 @trading_bp.route('/api/tokens/list', methods=['GET', 'OPTIONS'])
 def listTokens():
-   """
-   List Tokens API - GET /api/tokens/list
-  
-   Query Parameters:
-   - status: "active", "disabled", "all" (default: "active")
-   - limit: Number of tokens to return (default: 100)
-   - offset: Offset for pagination (default: 0)
-   """
-   if request.method == 'OPTIONS':
+    """
+    List Tokens API - GET /api/tokens/list
+    
+    Query Parameters:
+    - status: "active", "disabled", "all" (default: "active")
+    - limit: Number of tokens to return (default: 100)
+    - offset: Offset for pagination (default: 0)
+    """
+    if request.method == 'OPTIONS':
         return jsonify({}), 200
-  
-   try:
+    
+    try:
+        trasdingscheduler = TradingScheduler()
+        trasdingscheduler.handleTradingUpdatesFromJob()
+       
         # Parse query parameters
         status = request.args.get('status', 'active').lower()
         limit = int(request.args.get('limit', 100))
@@ -245,9 +209,7 @@ def listTokens():
             }), 400
        
         # Get tokens based on status
-        
         tokens = trading_handler.getActiveTokens()
-        
        
         # Apply pagination
         total_count = len(tokens)
@@ -285,12 +247,12 @@ def listTokens():
             }
         }), 200
        
-   except ValueError as e:
+    except ValueError as e:
         return jsonify({
             'success': False,
             'error': f'Invalid parameter: {str(e)}'
         }), 400
-   except Exception as e:
+    except Exception as e:
         logger.error(f"Error in listTokens API: {str(e)}", exc_info=True)
         return jsonify({
             'success': False,
@@ -298,88 +260,3 @@ def listTokens():
         }), 500
 
 
-def addNewToken(requestData: dict, tradingAction, tokenAddress: str, pairAddress: str,
-                           tokenInfoFromAPI, pairCreatedTime: int, addedBy: str):
-    """
-    Handle new token flow with timeframes and AVWAP validation and processing
-    
-    Args:
-         requestData: Request payload containing timeframes and AVWAP data
-         tradingAction: TradingActionEnhanced instance
-         tokenAddress: Token contract address
-         pairAddress: Token pair address
-         tokenInfoFromAPI: Token info from DexScreener
-         pairCreatedTime: Unix timestamp of pair creation
-         addedBy: User who added the token
-         
-    Returns:
-         Result from addNewTokenWithTimeframes method
-    """
-    # Extract and validate timeframes
-    timeframes = requestData.get('timeframes', [])
-    
-    # Validate AVWAP data for new token
-    avwapData = requestData.get(TradingAPIConstants.Log.AVWAP_TYPE)
-    
-    # Use new token validation (only AVWAP required)
-    isValid, errorMessage, processedAVWAPData = TradingAPIUtil.validateNewTokenRequirements(avwapData)
-    if not isValid:
-        return {'success': False, 'error': errorMessage}
-    
-    # Process new token with validated timeframes and AVWAP data
-    return tradingAction.addNewTokenWithTimeframes(
-         tokenAddress=tokenAddress,
-         pairAddress=pairAddress,
-         symbol=tokenInfoFromAPI.symbol,
-         name=tokenInfoFromAPI.name,
-         pairCreatedTime=pairCreatedTime,
-         timeframes=timeframes,
-         addedBy=addedBy,
-         avwapData=processedAVWAPData
-    )
-
-
-def addOldToken(requestData: dict, tradingAction, tokenAddress: str, pairAddress: str,
-                 tokenInfoFromAPI, pairCreatedTime: int, addedBy: str):
-    """
-    Handle old token flow with timeframes, EMA, and AVWAP validation
-    
-    Args:
-         requestData: Request payload containing timeframes, EMA, and AVWAP data
-         tradingAction: TradingActionEnhanced instance
-         tokenAddress: Token contract address
-         pairAddress: Token pair address
-         tokenInfoFromAPI: Token info from DexScreener
-         pairCreatedTime: Unix timestamp of pair creation
-         addedBy: User who added the token
-         
-    Returns:
-         Result from addOldTokenWithTimeframes method
-    """
-    # Extract and validate timeframes
-    timeframes = requestData.get(TradingAPIConstants.RequestParameters.TIMEFRAMES, [])
-    
-    # Validate EMA and AVWAP data for old token
-    avwapData = requestData.get(TradingAPIConstants.Log.AVWAP_TYPE)
-    ema21Data = requestData.get(TradingAPIConstants.Log.EMA_21_TYPE)
-    ema34Data = requestData.get(TradingAPIConstants.Log.EMA_34_TYPE)
-    
-    # Use old token validation (both EMA and AVWAP required)
-    isValid, errorMessage, processedEMAData, processedAVWAPData = TradingAPIUtil.validateOldTokenRequirements(
-        ema21Data, ema34Data, avwapData
-    )
-    if not isValid:
-        return {'success': False, 'error': errorMessage}
-    
-    # Process old token with validated timeframes, EMA, and AVWAP data
-    return tradingAction.addOldTokenWithTimeframes(
-         tokenAddress=tokenAddress,
-         pairAddress=pairAddress,
-         symbol=tokenInfoFromAPI.symbol,
-         name=tokenInfoFromAPI.name,
-         pairCreatedTime=pairCreatedTime,
-         timeframes=timeframes,
-         perTimeframeEMAData=processedEMAData,
-         addedBy=addedBy,
-         avwapData=processedAVWAPData
-    )
