@@ -23,6 +23,9 @@ from api.trading.request import TimeframeRecord
 from api.trading.request import TrackedToken
 from api.trading.request import EMAState
 from api.trading.request import AVWAPState
+from api.trading.request import TrackedToken, TimeframeRecord, OHLCVDetails, Alert
+# Add EMA available times for processing
+from api.trading.request import EMAState        
 
 
 logger = get_logger(__name__)
@@ -117,6 +120,8 @@ class TradingHandler(BaseDBHandler):
                 avwapvalue DECIMAL(20,8),
                 ema21value DECIMAL(20,8),
                 ema34value DECIMAL(20,8),
+                trend VARCHAR(20),
+                status VARCHAR(50),
                 iscomplete BOOLEAN DEFAULT TRUE,
                 datasource VARCHAR(20) DEFAULT 'api',
                 createdat TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
@@ -180,6 +185,29 @@ class TradingHandler(BaseDBHandler):
                 createdat TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
                 lastupdatedat TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
                 PRIMARY KEY (tokenaddress, timeframe)
+            )
+        """))
+        
+        # 7. Alerts
+        cursor.execute(text("""
+            CREATE TABLE IF NOT EXISTS alerts (
+                alertid BIGSERIAL PRIMARY KEY,
+                tokenid BIGINT NOT NULL,
+                tokenaddress CHAR(44) NOT NULL,
+                pairaddress CHAR(44) NOT NULL,
+                timeframe VARCHAR(10) NOT NULL,
+                vwap DECIMAL(20,8),
+                ema21 DECIMAL(20,8),
+                ema34 DECIMAL(20,8),
+                avwap DECIMAL(20,8),
+                lastupdatedunix BIGINT,
+                trend VARCHAR(20),
+                status VARCHAR(50),
+                touchcount INTEGER DEFAULT 0,
+                latesttouchunix BIGINT,
+                createdat TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+                lastupdatedat TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+                UNIQUE(tokenaddress, timeframe)
             )
         """))
         
@@ -336,177 +364,6 @@ class TradingHandler(BaseDBHandler):
         return CommonUtil.calculateInitialStartTime(unixtime, timeframe)
 
     
-    def batchPersistAllCandles(self, candleData: Dict[str, Dict]) -> int:
-        """
-        OPTIMIZED: Batch persist ALL candles from multiple tokens with multiple timeframes
-        
-        NEW FLOW COMPATIBLE:
-        - Handles keys like "token_address_timeframe" format
-        - Supports multiple timeframes per token (30min, 1h, 4h)
-        - Updates timeframemetadata with proper lastfetchedat and nextfetchat
-        
-        Args:
-            candleData: Dict mapping "token_address_timeframe" -> {
-                'candles': List[Dict],
-                'latest_time': int,
-                'count': int
-            }
-            
-        Returns:
-            int: Number of successfully persisted candles
-        """
-        try:
-            if not candleData:
-                return 0
-            
-            totalCandles = 0
-            
-            with self.conn_manager.transaction() as cursor:
-                # STEP 1: Parse data and build update structures
-                timeframeUpdateData = []
-                ohlcvDetailsData = []
-                
-                for key, data in candleData.items():
-                    candles = data[CandleDataKeys.CANDLES]
-                    if not candles:
-                        continue
-                    
-                    # Extract token address and timeframe from key
-                    tokenAddress, timeframe = self.findTokenAddressAndTimeframeFromKey(key)
-                    if not tokenAddress or not timeframe:
-                        logger.warning(f"Invalid candle data key format: {key}")
-                        continue
-                        
-                    # Get metadata from first candle and data
-                    firstCandle = candles[0]
-                    pairAddress = firstCandle[TradingHandlerConstants.OHLCVDetails.PAIR_ADDRESS]
-                    latestTime = data[CandleDataKeys.LATEST_TIME]
-                    
-                    # Calculate next fetch time based on timeframe
-                    nextFetchTime = self.calculateNextFetchTimeForTimeframe(latestTime, timeframe)
-                    
-                    # Prepare timeframe update data
-                    timeframeUpdateData.append((
-                        tokenAddress, pairAddress, timeframe,
-                        latestTime, nextFetchTime
-                    ))
-                    
-                    # Prepare candle insert data
-                    for candle in candles:
-                        ohlcvDetailsData.append((
-                            candle[TradingHandlerConstants.OHLCVDetails.TOKEN_ADDRESS], 
-                            candle[TradingHandlerConstants.OHLCVDetails.PAIR_ADDRESS], 
-                            candle[TradingHandlerConstants.OHLCVDetails.TIMEFRAME],
-                            candle[TradingHandlerConstants.OHLCVDetails.UNIX_TIME], 
-                            candle[TradingHandlerConstants.OHLCVDetails.OPEN_PRICE], 
-                            candle[TradingHandlerConstants.OHLCVDetails.HIGH_PRICE],
-                            candle[TradingHandlerConstants.OHLCVDetails.LOW_PRICE], 
-                            candle[TradingHandlerConstants.OHLCVDetails.CLOSE_PRICE], 
-                            candle[TradingHandlerConstants.OHLCVDetails.VOLUME], 
-                            int(candle.get(TradingHandlerConstants.OHLCVDetails.TRADES, 0)), 
-                            candle[TradingHandlerConstants.OHLCVDetails.DATA_SOURCE]
-                        ))
-                        totalCandles += 1
-                
-                # STEP 2: Update timeframe metadata and get IDs
-                timeframePKIds = self.batchUpdateTimeframe(cursor, timeframeUpdateData)
-                
-                # STEP 3: Insert candles with timeframe IDs
-                if ohlcvDetailsData:
-                    self.batchRecordCandlesIntoOHLCV(cursor, ohlcvDetailsData, timeframePKIds)
-            
-            logger.info(f"Batch persisted {totalCandles} candles across {len(candleData)} token-timeframe combinations")
-            return totalCandles
-            
-        except Exception as e:
-            logger.error(f"Error in batch persist candles: {e}")
-            return 0
-    
-    def findTokenAddressAndTimeframeFromKey(self, key: str) -> Tuple[str, str]:
-        """Parse candle data key to extract token address and timeframe"""
-        try:
-            # Key format: "token_address_timeframe" 
-            parts = key.rsplit('_', 1)  # Split from right to handle addresses with underscores
-            if len(parts) == 2:
-                return parts[0], parts[1]
-        except Exception:
-            return None, None
-    
-    def calculateNextFetchTimeForTimeframe(self, latestTime: int, timeframe: str) -> int:
-        """Calculate next fetch time based on specific timeframe - delegates to CommonUtil"""
-        return CommonUtil.calculateNextFetchTimeForTimeframe(latestTime, timeframe)
-    
-    def batchUpdateTimeframe(self, cursor, timeframeUpdateData: List[Tuple]) -> Dict[Tuple, int]:
-        """Update timeframe metadata and return mapping of (token, timeframe) -> id"""
-        timeframePKIds = {}
-        
-        if not timeframeUpdateData:
-            return timeframePKIds
-        
-        for tokenAddress, pairAddress, timeframe, lastFetchTime, nextFetchTime in timeframeUpdateData:
-            cursor.execute("""
-                INSERT INTO timeframemetadata 
-                (tokenaddress, pairaddress, timeframe, lastfetchedat, nextfetchat, createdat, lastupdatedat)
-                VALUES (%s, %s, %s, %s, %s, NOW(), NOW())
-                ON CONFLICT (tokenaddress, pairaddress, timeframe) 
-                DO UPDATE SET 
-                    lastfetchedat = %s,
-                    nextfetchat = %s,
-                    lastupdatedat = NOW()
-                RETURNING id
-            """, (
-                tokenAddress, pairAddress, timeframe,
-                lastFetchTime, nextFetchTime,
-                lastFetchTime, nextFetchTime
-            ))
-            
-            result = cursor.fetchone()
-            timeframe_id = result['id']
-            timeframePKIds[(tokenAddress, timeframe)] = timeframe_id
-        
-        return timeframePKIds
-    
-    def batchRecordCandlesIntoOHLCV(self, cursor, ohlcvDetailsData: List[Tuple], timeframeIds: Dict[Tuple, int]):
-        """Insert candles with proper timeframe IDs and timebuckets"""
-        if not ohlcvDetailsData:
-            return
-        
-        candleInsertData = []
-        
-        for candle in ohlcvDetailsData:
-            tokenAddress = candle[0]
-            timeframe = candle[2]
-            timeframePK = timeframeIds.get((tokenAddress, timeframe))
-            
-            if timeframePK:
-                unixtime = candle[3]
-                timebucket = self._calculateTimeBucket(unixtime, timeframe)
-                
-                candleInsertData.append((
-                    timeframePK,    # timeframeid
-                    candle[0],  # tokenaddress
-                    candle[1],  # pairaddress
-                    candle[2],  # timeframe
-                    candle[3],  # unixtime
-                    timebucket,      # timebucket
-                    candle[4],  # openprice
-                    candle[5],  # highprice
-                    candle[6],  # lowprice
-                    candle[7],  # closeprice
-                    candle[8],  # volume
-                    candle[9],  # trades
-                    candle[10]   # datasource
-                ))
-        
-        if candleInsertData:
-            cursor.executemany("""
-                INSERT INTO ohlcvdetails 
-                (timeframeid, tokenaddress, pairaddress, timeframe, unixtime, timebucket, 
-                 openprice, highprice, lowprice, closeprice, volume, trades, datasource)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-                ON CONFLICT (tokenaddress, timeframe, unixtime) DO NOTHING
-            """, candleInsertData)
-    
     def getAllVWAPDataForScheduler(self) -> List['TrackedToken']:
 
         try:
@@ -621,76 +478,7 @@ class TradingHandler(BaseDBHandler):
             logger.error(f"Error getting all VWAP data for scheduler: {e}")
             return []
     
-    def batchUpdateVWAPData(self, vwapCandleUpdatedData: List[Dict], vwapSessionUpdatedData: List[Dict]) -> bool:
-        """
-        Batch update VWAP values and sessions for all tokens at once
-        
-        Args:
-            vwap_updates: List of candle VWAP updates 
-            session_updates: List of session updates/creates
-        
-        Returns:
-            bool: True if successful
-        """
-        try:
-            with self.conn_manager.transaction() as cursor:
-                # STEP 1: Batch update OHLCV VWAP values
-                if vwapCandleUpdatedData:
-                    vwapCandleData = []
-                    for update in vwapCandleUpdatedData:
-                        vwapCandleData.append((
-                            float(update[TradingHandlerConstants.OHLCVDetails.VWAP_VALUE]),
-                            update[TradingHandlerConstants.OHLCVDetails.TOKEN_ADDRESS],
-                            update[TradingHandlerConstants.OHLCVDetails.TIMEFRAME], 
-                            update[TradingHandlerConstants.OHLCVDetails.UNIX_TIME]
-                        ))
-                    
-                    cursor.executemany("""
-                        UPDATE ohlcvdetails 
-                        SET vwapvalue = %s, lastupdatedat = NOW()
-                        WHERE tokenaddress = %s AND timeframe = %s AND unixtime = %s
-                    """, vwapCandleData)
-                
-                # STEP 2: Batch update/insert VWAP sessions
-                if vwapSessionUpdatedData:
-                    vwapSessionData = []
-                    for update in vwapSessionUpdatedData:
-                        vwapSessionData.append((
-                            update[TradingHandlerConstants.VWAPSessions.TOKEN_ADDRESS],
-                            update[TradingHandlerConstants.VWAPSessions.PAIR_ADDRESS],
-                            update[TradingHandlerConstants.VWAPSessions.TIMEFRAME],
-                            update[TradingHandlerConstants.VWAPSessions.SESSION_START_UNIX],
-                            update[TradingHandlerConstants.VWAPSessions.SESSION_END_UNIX],
-                            float(update[TradingHandlerConstants.VWAPSessions.CUMULATIVE_PV]),
-                            float(update[TradingHandlerConstants.VWAPSessions.CUMULATIVE_VOLUME]),
-                            float(update[TradingHandlerConstants.VWAPSessions.CURRENT_VWAP]),
-                            update[TradingHandlerConstants.VWAPSessions.LAST_CANDLE_UNIX],
-                            update[TradingHandlerConstants.VWAPSessions.NEXT_CANDLE_FETCH]
-                        ))
-                    
-                    cursor.executemany("""
-                        INSERT INTO vwapsessions 
-                        (tokenaddress, pairaddress, timeframe, sessionstartunix, sessionendunix,
-                         cumulativepv, cumulativevolume, currentvwap, lastcandleunix, nextcandlefetch,
-                         createdat, lastupdatedat)
-                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, NOW(), NOW())
-                        ON CONFLICT (tokenaddress, timeframe) 
-                        DO UPDATE SET
-                            sessionstartunix = EXCLUDED.sessionstartunix,
-                            sessionendunix = EXCLUDED.sessionendunix,
-                            cumulativepv = EXCLUDED.cumulativepv,
-                            cumulativevolume = EXCLUDED.cumulativevolume,
-                            currentvwap = EXCLUDED.currentvwap,
-                            lastcandleunix = EXCLUDED.lastcandleunix,
-                            nextcandlefetch = EXCLUDED.nextcandlefetch,
-                            lastupdatedat = NOW()
-                    """, vwapSessionData)
-                
-                return True
-                
-        except Exception as e:
-            logger.error(f"Error in batch VWAP update: {e}")
-            return False
+    
     
     def getAllEMADataWithCandlesForScheduler(self) -> List['TrackedToken']:
         """
@@ -944,154 +732,6 @@ class TradingHandler(BaseDBHandler):
         return persistedRecords
     
 
-    def batchUpdateEMAData(self, emaCandlesUpdatedData: List[Dict], emaStateUpdatedData: List[Dict]) -> bool:
-        """
-        Batch update EMA values and states for all tokens at once
-        
-        Args:
-            ema_updates: List of candle EMA updates 
-            state_updates: List of EMA state updates
-        
-        Returns:
-            bool: True if successful
-        """
-        try:
-            with self.conn_manager.transaction() as cursor:
-                # STEP 1: Batch update OHLCV EMA values
-                if emaCandlesUpdatedData:
-                    # Group by EMA period for efficient updates
-                    ema21Data = []
-                    ema34Data = []
-                    
-                    for stateData in emaCandlesUpdatedData:
-                        if stateData[IndicatorConstants.EMAStates.EMA_PERIOD] == IndicatorConstants.EMAStates.EMA_21:
-                            ema21Data.append((
-                                float(stateData[IndicatorConstants.EMAStates.EMA_VALUE]),
-                                stateData[TradingHandlerConstants.OHLCVDetails.TOKEN_ADDRESS],
-                                stateData[TradingHandlerConstants.OHLCVDetails.TIMEFRAME],
-                                stateData[TradingHandlerConstants.OHLCVDetails.UNIX_TIME]
-                            ))
-                        elif stateData[IndicatorConstants.EMAStates.EMA_PERIOD] == IndicatorConstants.EMAStates.EMA_34:
-                            ema34Data.append((
-                                float(stateData[IndicatorConstants.EMAStates.EMA_VALUE]),
-                                stateData[TradingHandlerConstants.OHLCVDetails.TOKEN_ADDRESS],
-                                stateData[TradingHandlerConstants.OHLCVDetails.TIMEFRAME],
-                                stateData[TradingHandlerConstants.OHLCVDetails.UNIX_TIME]
-                            ))
-                    
-                    # Batch update EMA21 values
-                    if ema21Data:
-                        cursor.executemany("""
-                            UPDATE ohlcvdetails 
-                            SET ema21value = %s, lastupdatedat = NOW()
-                            WHERE tokenaddress = %s AND timeframe = %s AND unixtime = %s
-                        """, ema21Data)
-                    
-                    # Batch update EMA34 values
-                    if ema34Data:
-                        cursor.executemany("""
-                            UPDATE ohlcvdetails 
-                            SET ema34value = %s, lastupdatedat = NOW()
-                            WHERE tokenaddress = %s AND timeframe = %s AND unixtime = %s
-                        """, ema34Data)
-                
-                # STEP 2: Batch update EMA states
-                if emaStateUpdatedData:
-                    emaStateData = []
-                    for stateData in emaStateUpdatedData:
-                        # Calculate next fetch time
-                        timeframeSeconds = CommonUtil.getTimeframeSeconds(stateData[TradingHandlerConstants.EMAStates.TIMEFRAME])
-                        nextFetchTime = stateData[TradingHandlerConstants.EMAStates.LAST_UPDATED_UNIX] + timeframeSeconds
-                        
-                        emaStateData.append((
-                            float(stateData[TradingHandlerConstants.EMAStates.EMA_VALUE]),
-                            stateData[TradingHandlerConstants.EMAStates.LAST_UPDATED_UNIX],
-                            nextFetchTime,
-                            stateData[TradingHandlerConstants.EMAStates.STATUS],
-                            stateData[TradingHandlerConstants.EMAStates.TOKEN_ADDRESS],
-                            stateData[TradingHandlerConstants.EMAStates.TIMEFRAME],
-                            str(stateData[IndicatorConstants.EMAStates.EMA_PERIOD])
-                        ))
-                    
-                    cursor.executemany("""
-                        UPDATE emastates 
-                        SET emavalue = %s, lastupdatedunix = %s, nextfetchtime = %s, 
-                            status = %s, lastupdatedat = NOW()
-                        WHERE tokenaddress = %s AND timeframe = %s AND emakey = %s
-                    """, emaStateData)
-                
-                return True
-                
-        except Exception as e:
-            logger.error(f"Error in batch EMA update: {e}")
-            return False
-
-
-    def getAllCandlesFromAllTimeframes(self, tokenAddress: str, pairAddress: str) -> Dict[str, List[Dict]]:
-        """
-        Get ALL candles for all timeframes in a single optimized database call.
-        
-        Uses LEFT JOIN to include timeframes with no candles (lastfetchedat IS NULL).
-        Returns empty lists for timeframes without candle data, enabling indicator processors
-        to create appropriate empty records.
-        
-        Args:
-            tokenAddress: Token contract address
-            pairAddress: Pair contract address
-            
-        Returns:
-            Dict mapping timeframe -> List of candle data
-        """
-        try:
-            with self.conn_manager.transaction() as cursor:
-                # Single optimized query using LEFT JOIN to get all timeframes with their candles
-                cursor.execute(text("""
-                    SELECT tm.timeframe, 
-                           ohlcv.unixtime, ohlcv.openprice, ohlcv.highprice, 
-                           ohlcv.lowprice, ohlcv.closeprice, ohlcv.volume, ohlcv.trades
-                    FROM timeframemetadata tm
-                    LEFT JOIN ohlcvdetails ohlcv ON (
-                        tm.tokenaddress = ohlcv.tokenaddress AND 
-                        tm.pairaddress = ohlcv.pairaddress AND 
-                        tm.timeframe = ohlcv.timeframe
-                    )
-                    WHERE tm.tokenaddress = %s AND tm.pairaddress = %s 
-                    AND tm.isactive = true
-                    ORDER BY tm.timeframe, ohlcv.unixtime ASC
-                """), (tokenAddress, pairAddress))
-                
-                results = cursor.fetchall()
-                
-                # Group candles by timeframe - empty lists for timeframes with no candles
-                timeframeCandlesMap = {}
-                for row in results:
-                    timeframe = row[TradingHandlerConstants.TimeframeMetadata.TIMEFRAME]
-                    
-                    # Initialize timeframe if not exists
-                    if timeframe not in timeframeCandlesMap:
-                        timeframeCandlesMap[timeframe] = []
-
-                    # Add candle data if it exists (LEFT JOIN may return NULL values)
-                    if row[TradingHandlerConstants.OHLCVDetails.UNIX_TIME] is not None:
-                        timeframeCandlesMap[timeframe].append({
-                            TradingHandlerConstants.OHLCVDetails.UNIX_TIME: row[TradingHandlerConstants.OHLCVDetails.UNIX_TIME],
-                            TradingHandlerConstants.OHLCVDetails.OPEN_PRICE: row[TradingHandlerConstants.OHLCVDetails.OPEN_PRICE],
-                            TradingHandlerConstants.OHLCVDetails.HIGH_PRICE: row[TradingHandlerConstants.OHLCVDetails.HIGH_PRICE],
-                            TradingHandlerConstants.OHLCVDetails.LOW_PRICE: row[TradingHandlerConstants.OHLCVDetails.LOW_PRICE],
-                            TradingHandlerConstants.OHLCVDetails.CLOSE_PRICE: row[TradingHandlerConstants.OHLCVDetails.CLOSE_PRICE],
-                            TradingHandlerConstants.OHLCVDetails.VOLUME: row[TradingHandlerConstants.OHLCVDetails.VOLUME],
-                            TradingHandlerConstants.OHLCVDetails.TRADES: row[TradingHandlerConstants.OHLCVDetails.TRADES]
-                        })
-                
-                logger.info(f"Retrieved candles for {len(timeframeCandlesMap)} timeframes: "
-                          f"{sum(1 for candles in timeframeCandlesMap.values() if candles)} with data, "
-                          f"{sum(1 for candles in timeframeCandlesMap.values() if not candles)} empty")
-                
-                return timeframeCandlesMap
-                
-        except Exception as e:
-            logger.error(f"Error retrieving candles for all timeframes: {e}")
-            return {}
 
     def getAllTimeframeRecordsReadyForFetching(self, buffer_seconds: int = 300) -> List['TrackedToken']:
         try:
@@ -1164,235 +804,6 @@ class TradingHandler(BaseDBHandler):
             logger.error(f"Error getting timeframe records ready for fetching: {e}")
             return []
 
-    def recordVwapCandleUpdateAndVwapSessionUpdateFromAPI(self, tokenAddress: str, pairAddress: str, calcuatedVwapData: List[Dict]) -> Dict:
-        """
-        API FLOW DATABASE OPERATION: Execute all VWAP operations (candle updates + session creation) in single SQL transaction
-        Properly updates individual candles with their corresponding VWAP values instead of using final VWAP for all candles
-        """
-        try:
-            with self.conn_manager.transaction() as cursor:
-                # Prepare all VWAP updates in single batch
-                vwapCandleUpdateData = []
-                vwapSessionUpdateData = []
-                
-                for vwapData in calcuatedVwapData:
-                    timeframe = vwapData[TradingHandlerConstants.TimeframeMetadata.TIMEFRAME]
-                    calculatedVwap = vwapData[TradingHandlerConstants.VWAPSessions.CURRENT_VWAP]
-                    nextFetchAtTime = vwapData[TradingHandlerConstants.VWAPSessions.NEXT_CANDLE_FETCH]
-                    dayStart = vwapData[TradingHandlerConstants.VWAPSessions.SESSION_START_UNIX]
-                    dayEnd = vwapData[TradingHandlerConstants.VWAPSessions.SESSION_END_UNIX]  # Use pre-calculated dayEnd
-                    
-                    # FIXED: Update each candle with its corresponding VWAP value instead of final VWAP for all
-                    for candleVWAP in calculatedVwap[IndicatorConstants.VWAPSessions.CANDLE_VWAPS]:
-                        vwapCandleUpdateData.append((
-                            float(candleVWAP[TradingHandlerConstants.OHLCVDetails.VWAP_VALUE]),  # Use individual candle VWAP
-                            tokenAddress,
-                            pairAddress,
-                            timeframe,
-                            candleVWAP[TradingHandlerConstants.OHLCVDetails.UNIX_TIME]
-                        ))
-                    
-                    # Collect VWAP session data for batch execution using pre-calculated dayEnd
-                    vwapSessionUpdateData.append((
-                        tokenAddress, pairAddress, timeframe, dayStart, dayEnd,
-                        float(calculatedVwap.get(TradingHandlerConstants.VWAPSessions.CUMULATIVE_PV, 0)), 
-                        float(calculatedVwap.get(TradingHandlerConstants.VWAPSessions.CUMULATIVE_VOLUME, 0)),
-                        float(calculatedVwap.get(TradingHandlerConstants.VWAPSessions.CURRENT_VWAP, 0)), 
-                        calculatedVwap.get(TradingHandlerConstants.VWAPSessions.LAST_CANDLE_UNIX),
-                        nextFetchAtTime
-                    ))
-                
-                # Single batch update for all VWAP values across all timeframes
-                if vwapCandleUpdateData:
-                    cursor.executemany("""
-                        UPDATE ohlcvdetails 
-                        SET vwapvalue = %s
-                        WHERE tokenaddress = %s AND pairaddress = %s AND timeframe = %s AND unixtime = %s
-                    """, vwapCandleUpdateData)
-                
-                # Single batch insert/update for all VWAP sessions across all timeframes
-                if vwapSessionUpdateData:
-                    cursor.executemany("""
-                        INSERT INTO vwapsessions 
-                        (tokenaddress, pairaddress, timeframe, sessionstartunix, sessionendunix,
-                         cumulativepv, cumulativevolume, currentvwap, lastcandleunix, nextcandlefetch)
-                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-                        ON CONFLICT (tokenaddress, timeframe) 
-                        DO UPDATE SET 
-                            sessionstartunix = EXCLUDED.sessionstartunix,
-                            sessionendunix = EXCLUDED.sessionendunix,
-                            cumulativepv = EXCLUDED.cumulativepv,
-                            cumulativevolume = EXCLUDED.cumulativevolume,
-                            currentvwap = EXCLUDED.currentvwap,
-                            lastcandleunix = EXCLUDED.lastcandleunix,
-                            nextcandlefetch = EXCLUDED.nextcandlefetch,
-                            lastupdatedat = NOW()
-                    """, vwapSessionUpdateData)
-                
-                logger.info(f"API VWAP operations completed: {len(vwapCandleUpdateData)} candle updates with individual VWAP values, {len(vwapSessionUpdateData)} session updates")
-                return {'success': True}
-                
-        except Exception as e:
-            logger.error(f"Error in API VWAP operations: {e}")
-            return {'success': False, 'error': str(e)}
-
-    def updateEMA(self, emaStateUpdatedData: List[Dict], emaCandleUpdatedData: List[Dict]):
-        """
-        API FLOW HELPER: Execute all EMA operations (state creation + candle updates) in single transaction
-        Optimized batch operation for API flow's initial EMA state and value creation
-        """
-        try:
-            with self.conn_manager.transaction() as cursor:
-                from sqlalchemy import text
-                
-                # Batch insert/update EMA states
-                if emaStateUpdatedData:
-                    emaStateUpdateQueryData = []
-                    for emaState in emaStateUpdatedData:
-                        emaStateUpdateQueryData.append((
-                            emaState[TradingHandlerConstants.EMAStates.TOKEN_ADDRESS],
-                            emaState[TradingHandlerConstants.EMAStates.PAIR_ADDRESS],
-                            emaState[TradingHandlerConstants.EMAStates.TIMEFRAME],
-                            emaState[TradingHandlerConstants.EMAStates.EMA_KEY],
-                            emaState[TradingHandlerConstants.EMAStates.EMA_VALUE],
-                            emaState[TradingHandlerConstants.EMAStates.LAST_UPDATED_UNIX],
-                            emaState[TradingHandlerConstants.EMAStates.NEXT_FETCH_TIME],
-                            emaState[TradingHandlerConstants.EMAStates.EMA_AVAILABLE_TIME],
-                            emaState[TradingHandlerConstants.EMAStates.PAIR_CREATED_TIME],
-                            int(emaState[TradingHandlerConstants.EMAStates.STATUS])
-                        ))
-                    
-                    cursor.executemany("""
-                        INSERT INTO emastates 
-                        (tokenaddress, pairaddress, timeframe, emakey, emavalue, 
-                         lastupdatedunix, nextfetchtime, emaavailabletime, paircreatedtime, status)
-                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-                        ON CONFLICT (tokenaddress, timeframe, emakey) 
-                        DO UPDATE SET 
-                            emavalue = EXCLUDED.emavalue,
-                            lastupdatedunix = EXCLUDED.lastupdatedunix,
-                            nextfetchtime = EXCLUDED.nextfetchtime,
-                            status = EXCLUDED.status,
-                            lastupdatedat = NOW()
-                    """, emaStateUpdateQueryData)
-                    
-                    logger.info(f"Batch inserted/updated {len(emaStateUpdateQueryData)} EMA states")
-                
-                # Batch update EMA values - separate updates for EMA21 and EMA34
-                if emaCandleUpdatedData:
-                    # Separate data by EMA period
-                    ema21Updates = []
-                    ema34Updates = []
-                    
-                    for candle in emaCandleUpdatedData:
-                        if candle[IndicatorConstants.EMAStates.EMA_PERIOD] == IndicatorConstants.EMAStates.EMA_21:
-                            ema21Updates.append((
-                                candle[IndicatorConstants.EMAStates.EMA_VALUE],
-                                candle[TradingHandlerConstants.EMAStates.TOKEN_ADDRESS],
-                                candle[TradingHandlerConstants.EMAStates.TIMEFRAME],
-                                candle[TradingHandlerConstants.OHLCVDetails.UNIX_TIME]
-                            ))
-                        elif candle[IndicatorConstants.EMAStates.EMA_PERIOD] == IndicatorConstants.EMAStates.EMA_34:
-                            ema34Updates.append((
-                                candle[IndicatorConstants.EMAStates.EMA_VALUE],
-                                candle[TradingHandlerConstants.EMAStates.TOKEN_ADDRESS],
-                                candle[TradingHandlerConstants.EMAStates.TIMEFRAME],
-                                candle[TradingHandlerConstants.OHLCVDetails.UNIX_TIME]
-                            ))
-                    
-                    # Update EMA21 values
-                    if ema21Updates:
-                        cursor.executemany("""
-                            UPDATE ohlcvdetails 
-                            SET ema21value = %s
-                            WHERE tokenaddress = %s AND timeframe = %s AND unixtime = %s
-                        """, ema21Updates)
-                        logger.info(f"Batch updated {len(ema21Updates)} EMA21 candle values")
-                    
-                    # Update EMA34 values
-                    if ema34Updates:
-                        cursor.executemany("""
-                            UPDATE ohlcvdetails 
-                            SET ema34value = %s
-                            WHERE tokenaddress = %s AND timeframe = %s AND unixtime = %s
-                        """, ema34Updates)
-                        logger.info(f"Batch updated {len(ema34Updates)} EMA34 candle values")
-                
-                logger.info(f"All EMA operations completed in 2 SQL calls: {len(emaStateUpdatedData)} states, {len(emaCandleUpdatedData)} candle updates")
-                
-        except Exception as e:
-            logger.error(f"Error in batch EMA operations: {e}")
-            raise
-
-    def batchUpdateAVWAPData(self, avwapStateData: List[Dict], avwapCandleUpdateData: List[Dict]) -> bool:
-        """
-        Execute batch AVWAP operations in database
-        
-        Args:
-            avwapStateData: List of AVWAP state records to insert/update
-            avwapCandleUpdateData: List of candle AVWAP updates
-            
-        Returns:
-            bool: True if successful
-        """
-        try:
-            with self.conn_manager.transaction() as cursor:
-                # STEP 1: Batch insert/update AVWAP states
-                if avwapStateData:
-                    avwapStateQueryData = []
-                    for avwapState in avwapStateData:
-                        avwapStateQueryData.append((
-                            avwapState[TradingHandlerConstants.AVWAPStates.TOKEN_ADDRESS],
-                            avwapState[TradingHandlerConstants.AVWAPStates.PAIR_ADDRESS],
-                            avwapState[TradingHandlerConstants.AVWAPStates.TIMEFRAME],
-                            float(avwapState[TradingHandlerConstants.AVWAPStates.AVWAP]),
-                            float(avwapState[TradingHandlerConstants.AVWAPStates.CUMULATIVE_PV]),
-                            float(avwapState[TradingHandlerConstants.AVWAPStates.CUMULATIVE_VOLUME]),
-                            avwapState[TradingHandlerConstants.AVWAPStates.LAST_UPDATED_UNIX],
-                            avwapState[TradingHandlerConstants.AVWAPStates.NEXT_FETCH_TIME]
-                        ))
-                    
-                    cursor.executemany("""
-                        INSERT INTO avwapstates 
-                        (tokenaddress, pairaddress, timeframe, avwap, cumulativepv, cumulativevolume, 
-                         lastupdatedunix, nextfetchtime, createdat, lastupdatedat)
-                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, NOW(), NOW())
-                        ON CONFLICT (tokenaddress, timeframe) 
-                        DO UPDATE SET 
-                            avwap = EXCLUDED.avwap,
-                            cumulativepv = EXCLUDED.cumulativepv,
-                            cumulativevolume = EXCLUDED.cumulativevolume,
-                            lastupdatedunix = EXCLUDED.lastupdatedunix,
-                            nextfetchtime = EXCLUDED.nextfetchtime,
-                            lastupdatedat = NOW()
-                    """, avwapStateQueryData)
-                    
-                    logger.info(f"Batch inserted/updated {len(avwapStateQueryData)} AVWAP states")
-                
-                # STEP 2: Batch update AVWAP values in candles
-                if avwapCandleUpdateData:
-                    avwapCandleQueryData = []
-                    for candle in avwapCandleUpdateData:
-                        avwapCandleQueryData.append((
-                            float(candle[TradingHandlerConstants.OHLCVDetails.AVWAP_VALUE]),
-                            candle[TradingHandlerConstants.OHLCVDetails.TOKEN_ADDRESS],
-                            candle[TradingHandlerConstants.OHLCVDetails.TIMEFRAME],
-                            candle[TradingHandlerConstants.OHLCVDetails.UNIX_TIME]
-                        ))
-                    
-                    cursor.executemany("""
-                        UPDATE ohlcvdetails 
-                        SET avwapvalue = %s, lastupdatedat = NOW()
-                        WHERE tokenaddress = %s AND timeframe = %s AND unixtime = %s
-                    """, avwapCandleQueryData)
-                    
-                    logger.info(f"Batch updated {len(avwapCandleQueryData)} AVWAP candle values")
-            
-            return True
-            
-        except Exception as e:
-            logger.error(f"Error in batch AVWAP operations: {e}")
-            raise
 
     def batchPersistOptimizedTokenData(self, timeframeRecords: List, maxCandlesPerTimeframe: int = None) -> int:
         
@@ -1438,6 +849,8 @@ class TradingHandler(BaseDBHandler):
                             candle.avwapValue,
                             candle.ema21Value,
                             candle.ema34Value,
+                            candle.trend,
+                            candle.status,
                             candle.isComplete,
                             candle.dataSource
                         ))
@@ -1568,6 +981,8 @@ class TradingHandler(BaseDBHandler):
                                 candle.avwapValue,
                                 candle.ema21Value,
                                 candle.ema34Value,
+                                candle.trend,
+                                candle.status,
                                 candle.isComplete,
                                 candle.dataSource
                             ))
@@ -2054,15 +1469,17 @@ class TradingHandler(BaseDBHandler):
             INSERT INTO ohlcvdetails 
             (timeframeid, tokenaddress, pairaddress, timeframe, unixtime, timebucket, 
              openprice, highprice, lowprice, closeprice, volume, trades,
-             vwapvalue, avwapvalue, ema21value, ema34value, iscomplete, datasource,
+             vwapvalue, avwapvalue, ema21value, ema34value, trend, status, iscomplete, datasource,
              createdat, lastupdatedat)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, NOW(), NOW())
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, NOW(), NOW())
             ON CONFLICT (tokenaddress, timeframe, unixtime) 
             DO UPDATE SET 
                 vwapvalue = EXCLUDED.vwapvalue,
                 avwapvalue = EXCLUDED.avwapvalue,
                 ema21value = EXCLUDED.ema21value,
                 ema34value = EXCLUDED.ema34value,
+                trend = EXCLUDED.trend,
+                status = EXCLUDED.status,
                 lastupdatedat = NOW()
         """, candleData)
 
@@ -2119,5 +1536,307 @@ class TradingHandler(BaseDBHandler):
                 nextfetchtime = EXCLUDED.nextfetchtime,
                 lastupdatedat = NOW()
         """, avwapStateData)
+    
+    def createInitialAlerts(self, tokenId: int, tokenAddress: str, pairAddress: str, 
+                           timeframes: List[str]) -> bool:
+        """
+        Create initial alert entries for new token
+        
+        Args:
+            tokenId: Tracked token ID
+            tokenAddress: Token contract address
+            pairAddress: Trading pair address
+            timeframes: List of timeframes
+            
+        Returns:
+            bool: True if successful
+        """
+        try:
+            with self.conn_manager.transaction() as cursor:
+                alertData = []
+                for timeframe in timeframes:
+                    alertData.append((
+                        tokenId,
+                        tokenAddress,
+                        pairAddress,
+                        timeframe,
+                        'NEUTRAL'  # Initial trend
+                    ))
+                
+                cursor.executemany("""
+                    INSERT INTO alerts 
+                    (tokenid, tokenaddress, pairaddress, timeframe, trend, 
+                     touchcount, createdat, lastupdatedat)
+                    VALUES (%s, %s, %s, %s, %s, 0, NOW(), NOW())
+                    ON CONFLICT (tokenaddress, timeframe) DO NOTHING
+                """, alertData)
+                
+                logger.info(f"Created {len(alertData)} initial alerts for token {tokenAddress}")
+                return True
+                
+        except Exception as e:
+            logger.error(f"Error creating initial alerts: {e}")
+            return False
+    
+    def batchPersistAlerts(self, trackedTokens: List['TrackedToken']) -> int:
+        """
+        Batch persist alert data from tracked tokens
+        
+        Args:
+            trackedTokens: List of TrackedToken POJOs with alert data
+            
+        Returns:
+            int: Number of alerts updated
+        """
+        try:
+            totalAlertsUpdated = 0
+            
+            with self.conn_manager.transaction() as cursor:
+                # Collect alert data for batch operations
+                alertData = []
+                candleTrendStatusUpdates = []
+                
+                for trackedToken in trackedTokens:
+                    for timeframeRecord in trackedToken.timeframeRecords:
+                        if timeframeRecord.alert:
+                            alert = timeframeRecord.alert
+                            alertData.append((
+                                alert.tokenId,
+                                alert.tokenAddress,
+                                alert.pairAddress,
+                                alert.timeframe,
+                                alert.vwap,
+                                alert.ema21,
+                                alert.ema34,
+                                alert.avwap,
+                                alert.lastUpdatedUnix,
+                                alert.trend,
+                                alert.status,
+                                alert.touchCount,
+                                alert.latestTouchUnix
+                            ))
+                            totalAlertsUpdated += 1
+                            
+                            # Collect candle trend/status updates
+                            for candle in timeframeRecord.ohlcvDetails:
+                                if candle.trend is not None or candle.status is not None:
+                                    candleTrendStatusUpdates.append((
+                                        candle.trend,
+                                        candle.status,
+                                        candle.tokenAddress,
+                                        candle.timeframe,
+                                        candle.unixTime
+                                    ))
+                
+                # Execute alert updates
+                if alertData:
+                    cursor.executemany("""
+                        INSERT INTO alerts 
+                        (tokenid, tokenaddress, pairaddress, timeframe, vwap, ema21, ema34, avwap,
+                         lastupdatedunix, trend, status, touchcount, latesttouchunix,
+                         createdat, lastupdatedat)
+                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, NOW(), NOW())
+                        ON CONFLICT (tokenaddress, timeframe) 
+                        DO UPDATE SET 
+                            vwap = EXCLUDED.vwap,
+                            ema21 = EXCLUDED.ema21,
+                            ema34 = EXCLUDED.ema34,
+                            avwap = EXCLUDED.avwap,
+                            lastupdatedunix = EXCLUDED.lastupdatedunix,
+                            trend = EXCLUDED.trend,
+                            status = EXCLUDED.status,
+                            touchcount = EXCLUDED.touchcount,
+                            latesttouchunix = EXCLUDED.latesttouchunix,
+                            lastupdatedat = NOW()
+                    """, alertData)
+                
+                # Update candle trend/status
+                if candleTrendStatusUpdates:
+                    cursor.executemany("""
+                        UPDATE ohlcvdetails 
+                        SET trend = %s, status = %s
+                        WHERE tokenaddress = %s AND timeframe = %s AND unixtime = %s
+                    """, candleTrendStatusUpdates)
+                    logger.info(f"Updated trend/status for {len(candleTrendStatusUpdates)} candles")
+                
+                logger.info(f"Batch persisted {totalAlertsUpdated} alerts")
+                return totalAlertsUpdated
+                
+        except Exception as e:
+            logger.error(f"Error in batch persist alerts: {e}")
+            return 0
+    
+    def getCurrentAlertStateAndNewCandles(self, tokenAddress: str = None) -> List['TrackedToken']:
+        try:
+            with self.conn_manager.transaction() as cursor:
+                # Build where clause
+                whereClause = "WHERE tt.status = 1"
+                params = []
+                if tokenAddress:
+                    whereClause += " AND tt.tokenaddress = %s"
+                    params.append(tokenAddress)
+                
+                # Get alerts and candles for processing
+                query = text(f"""
+                    WITH alert_data AS (
+                        SELECT 
+                            a.alertid,
+                            a.tokenid,
+                            a.tokenaddress,
+                            a.pairaddress,
+                            a.timeframe,
+                            a.vwap as alert_vwap,
+                            a.ema21 as alert_ema21,
+                            a.ema34 as alert_ema34,
+                            a.avwap as alert_avwap,
+                            a.lastupdatedunix,
+                            a.trend as alert_trend,
+                            a.status as alert_status,
+                            a.touchcount,
+                            a.latesttouchunix,
+                            tt.trackedtokenid,
+                            tt.symbol,
+                            tt.name,
+                            tm.id as timeframeid,
+                            tm.lastfetchedat,
+                            es21.emaavailabletime as ema21availabletime,
+                            es34.emaavailabletime as ema34availabletime
+                        FROM alerts a
+                        INNER JOIN trackedtokens tt ON a.tokenid = tt.trackedtokenid
+                        INNER JOIN timeframemetadata tm ON a.tokenaddress = tm.tokenaddress 
+                            AND a.timeframe = tm.timeframe
+                        LEFT JOIN emastates es21 ON a.tokenaddress = es21.tokenaddress 
+                            AND a.timeframe = es21.timeframe AND es21.emakey = '21'
+                        LEFT JOIN emastates es34 ON a.tokenaddress = es34.tokenaddress 
+                            AND a.timeframe = es34.timeframe AND es34.emakey = '34'
+                        {whereClause}
+                    )
+                    SELECT 
+                        ad.*,
+                        o.unixtime,
+                        o.timebucket,
+                        o.openprice,
+                        o.highprice,
+                        o.lowprice,
+                        o.closeprice,
+                        o.volume,
+                        o.trades,
+                        o.vwapvalue,
+                        o.avwapvalue,
+                        o.ema21value,
+                        o.ema34value,
+                        o.trend as candle_trend,
+                        o.status as candle_status
+                    FROM alert_data ad
+                    LEFT JOIN ohlcvdetails o ON ad.tokenaddress = o.tokenaddress 
+                        AND ad.timeframe = o.timeframe
+                        AND o.unixtime > COALESCE(ad.lastupdatedunix, 0)
+                        AND o.vwapvalue IS NOT NULL
+                        AND o.avwapvalue IS NOT NULL
+                        AND (ad.ema21availabletime IS NULL OR o.unixtime < ad.ema21availabletime OR o.ema21value IS NOT NULL)
+                        AND (ad.ema34availabletime IS NULL OR o.unixtime < ad.ema34availabletime OR o.ema34value IS NOT NULL)
+                    ORDER BY ad.tokenaddress, ad.timeframe, o.unixtime
+                """)
+                
+                cursor.execute(query, params)
+                records = cursor.fetchall()
+                
+                # Organize into POJOs
+                trackedTokens = {}
+                
+                for row in records:
+                    tokenAddress = row['tokenaddress']
+                    
+                    # Create or get TrackedToken
+                    if tokenAddress not in trackedTokens:
+                        trackedTokens[tokenAddress] = TrackedToken(
+                            trackedTokenId=row['trackedtokenid'],
+                            tokenAddress=tokenAddress,
+                            symbol=row['symbol'],
+                            name=row['name'],
+                            pairAddress=row['pairaddress'],
+                            addedBy='alert_processor'
+                        )
+                    
+                    # Get or create TimeframeRecord
+                    timeframe = row['timeframe']
+                    timeframeRecord = trackedTokens[tokenAddress].getTimeframeRecord(timeframe)
+                    if not timeframeRecord:
+                        timeframeRecord = TimeframeRecord(
+                            timeframeId=row['timeframeid'],
+                            tokenAddress=tokenAddress,
+                            pairAddress=row['pairaddress'],
+                            timeframe=timeframe,
+                            lastFetchedAt=row['lastfetchedat'],
+                            isActive=True
+                        )
+                        
+                        # Add alert data
+                        timeframeRecord.alert = Alert(
+                            alertId=row['alertid'],
+                            tokenId=row['tokenid'],
+                            tokenAddress=tokenAddress,
+                            pairAddress=row['pairaddress'],
+                            timeframe=timeframe,
+                            vwap=row['alert_vwap'],
+                            ema21=row['alert_ema21'],
+                            ema34=row['alert_ema34'],
+                            avwap=row['alert_avwap'],
+                            lastUpdatedUnix=row['lastupdatedunix'],
+                            trend=row['alert_trend'],
+                            status=row['alert_status'],
+                            touchCount=row['touchcount'],
+                            latestTouchUnix=row['latesttouchunix']
+                        )
+                        
+                        if row['ema21availabletime']:
+                            timeframeRecord.ema21State = EMAState(
+                                tokenAddress=tokenAddress,
+                                pairAddress=row['pairaddress'],
+                                timeframe=timeframe,
+                                emaKey='21',
+                                emaAvailableTime=row['ema21availabletime']
+                            )
+                        if row['ema34availabletime']:
+                            timeframeRecord.ema34State = EMAState(
+                                tokenAddress=tokenAddress,
+                                pairAddress=row['pairaddress'],
+                                timeframe=timeframe,
+                                emaKey='34',
+                                emaAvailableTime=row['ema34availabletime']
+                            )
+                        
+                        trackedTokens[tokenAddress].addTimeframeRecord(timeframeRecord)
+                    
+                    # Add candle data if exists
+                    if row['unixtime']:
+                        candle = OHLCVDetails(
+                            tokenAddress=tokenAddress,
+                            pairAddress=row['pairaddress'],
+                            timeframe=timeframe,
+                            unixTime=row['unixtime'],
+                            timeBucket=row['timebucket'],
+                            openPrice=float(row['openprice']),
+                            highPrice=float(row['highprice']),
+                            lowPrice=float(row['lowprice']),
+                            closePrice=float(row['closeprice']),
+                            volume=float(row['volume']),
+                            trades=row['trades'],
+                            vwapValue=float(row['vwapvalue']) if row['vwapvalue'] else None,
+                            avwapValue=float(row['avwapvalue']) if row['avwapvalue'] else None,
+                            ema21Value=float(row['ema21value']) if row['ema21value'] else None,
+                            ema34Value=float(row['ema34value']) if row['ema34value'] else None,
+                            trend=row['candle_trend'],
+                            status=row['candle_status'],
+                            isComplete=True,
+                            dataSource='database'
+                        )
+                        timeframeRecord.addOHLCVDetail(candle)
+                
+                return list(trackedTokens.values())
+                
+        except Exception as e:
+            logger.error(f"Error getting alerts for processing: {e}")
+            return []
 
     

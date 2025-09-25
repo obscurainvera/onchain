@@ -11,6 +11,7 @@ if TYPE_CHECKING:
     from .VWAPSession import VWAPSession
     from .EMAState import EMAState
     from .AVWAPState import AVWAPState
+    from .Alert import Alert
 
 @dataclass
 class TimeframeRecord:
@@ -31,6 +32,7 @@ class TimeframeRecord:
     ema21State: Optional['EMAState'] = None
     ema34State: Optional['EMAState'] = None
     avwapState: Optional['AVWAPState'] = None
+    alert: Optional['Alert'] = None
     
     def addOHLCVDetail(self, ohlcv: 'OHLCVDetails'):
         """Add OHLCV detail to this timeframe"""

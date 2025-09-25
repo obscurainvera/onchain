@@ -32,7 +32,9 @@ class OHLCVDetails:
     ema21Value: Optional[float] = None
     ema34Value: Optional[float] = None
     
-
+    # Alert-related fields
+    trend: Optional[str] = None
+    status: Optional[str] = None
     
     def updateVWAPValue(self, vwapValue: float):
         """Update VWAP value for this candle"""
@@ -66,6 +68,8 @@ class OHLCVDetails:
             'avwapvalue': self.avwapValue,
             'ema21value': self.ema21Value,
             'ema34value': self.ema34Value,
+            'trend': self.trend,
+            'status': self.status,
             'iscomplete': self.isComplete,
             'datasource': self.dataSource
         }

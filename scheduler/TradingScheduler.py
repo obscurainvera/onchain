@@ -8,6 +8,7 @@ from api.trading.request import TrackedToken, OHLCVDetails
 from scheduler.VWAPProcessor import VWAPProcessor
 from scheduler.EMAProcessor import EMAProcessor
 from scheduler.AVWAPProcessor import AVWAPProcessor
+from scheduler.AlertsProcessor import AlertsProcessor
 from utils.CommonUtil import CommonUtil
 
 logger = get_logger(__name__)
@@ -18,13 +19,14 @@ class TradingScheduler:
     
     def __init__(self, dbPath: str = None):
         self.db = PortfolioDB()
-        self.trading_handler = TradingHandler(self.db)
+        self.trading_handler = TradingHandler(self.db.conn_manager)
         self.trading_action = TradingActionEnhanced(self.db)
         self.vwap_processor = VWAPProcessor(self.trading_handler)
         self.ema_processor = EMAProcessor(self.trading_handler)
         self.avwap_processor = AVWAPProcessor(self.trading_handler, self.trading_action.moralis_handler)
+        self.alerts_processor = AlertsProcessor(self.trading_handler)
         self.current_time = int(time.time())
-        logger.info("Trading scheduler initialized with POJO-based flow")
+        logger.info("Trading scheduler initialized with POJO-based flow and alerts")
 
     def handleTradingUpdatesFromJob(self):
         try:
@@ -37,6 +39,8 @@ class TradingScheduler:
             self.calculateAndPersistEMAIndicators()
             
             self.calculateAndPersistAVWAPIndicators()
+            
+            self.calculateAndPersistAlerts() # we need to check whether running the alerts processing in a sequential order affect the time take to run this scheduler, if it goes over 10 mins, then there would a delay fetching the recent candles
             
             logger.info("Trading scheduler completed")
             return True
@@ -168,6 +172,25 @@ class TradingScheduler:
         except Exception as e:
             logger.error(f"✗ AVWAP Calculation Failed: {e}")
     
+    def calculateAndPersistAlerts(self):
+        try:
+            logger.info("Alert Processing Started")
+            
+            alertsWithNewCandles = self.trading_handler.getCurrentAlertStateAndNewCandles()
+            if not alertsWithNewCandles:
+                logger.info("No alerts to process")
+                return
+            
+            # Process alerts for all tracked tokens
+            self.alerts_processor.processAlertsFromScheduler(alertsWithNewCandles)
+            
+            # Persist updated alert data
+            alertsUpdated = self.trading_handler.batchPersistAlerts(alertsWithNewCandles)
+            
+            logger.info(f"✓ Alert Processing Completed for {alertsUpdated} alerts")
+            
+        except Exception as e:
+            logger.error(f"✗ Alert Processing Failed: {e}")
 
     def handleTradingDataFromAPI(self) -> Dict[str, Any]:
         success = self.handleTradingUpdatesFromJob()

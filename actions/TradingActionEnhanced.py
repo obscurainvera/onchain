@@ -76,13 +76,7 @@ class TradingActionEnhanced:
         return timeframeRecords
    
     
-    
-    def calculateAVWAPFromHistoricalData(self, tokenAddress: str, pairAddress: str, 
-                                        pairCreatedTime: int, timeframes: List[str]) -> Dict[str, Any]:
-                                        
-        return self.avwap_processor.calculateAVWAPFromHistoricalData(
-            tokenAddress, pairAddress, pairCreatedTime, timeframes
-        )
+
 
     def addTokenForTracking(self, request: AddTokenRequest, tokenInfo: TokenInfo) -> AddTokenResponse:
         try:
@@ -115,6 +109,14 @@ class TradingActionEnhanced:
             # Step 5: Persist everything in one transaction (latest 2 candles + all indicator data)
             candlesInserted = self.updateCandleAndIndicatorData(
                 candleDataByTimeframe
+            )
+            
+            # Step 6: Initialize alerts for the token
+            self.trading_handler.createInitialAlerts(
+                tokenId=tokenId,
+                tokenAddress=request.tokenAddress,
+                pairAddress=request.pairAddress,
+                timeframes=request.timeframes
             )
             
             return AddTokenResponse.success_response(

@@ -11,6 +11,7 @@ from .VWAPSession import VWAPSession
 from .EMAState import EMAState
 from .AVWAPState import AVWAPState
 from .TrackedToken import TrackedToken
+from .Alert import Alert, TrendType
 
 __all__ = [
     'AddTokenRequest',
@@ -22,5 +23,7 @@ __all__ = [
     'VWAPSession',
     'EMAState',
     'AVWAPState',
-    'TrackedToken'
+    'TrackedToken',
+    'Alert',
+    'TrendType'
 ]
