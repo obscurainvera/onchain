@@ -11,6 +11,7 @@ from api.trading.TradingAPIUtil import TradingAPIUtil
 from constants.TradingConstants import TimeframeConstants, TokenFlowConstants, ValidationMessages
 import time
 
+from scheduler.CredentialResetScheduler import CredentialResetScheduler
 from scheduler.TradingScheduler import TradingScheduler
 
 logger = get_logger(__name__)
@@ -220,6 +221,10 @@ def listTokens():
   
    try:
         # Parse query parameters
+
+        CredentialResetScheduler().processCredentialResets()
+
+
         status = request.args.get('status', 'active').lower()
         limit = int(request.args.get('limit', 100))
         offset = int(request.args.get('offset', 0))

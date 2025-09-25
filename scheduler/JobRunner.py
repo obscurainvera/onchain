@@ -97,7 +97,7 @@ class JobRunner:
         config = get_config()
         jobs = [
             ("trading_updates", {"minute": "*/5"}),
-            ("credential_reset", {"hour": 2, "minute": 0})  # Daily at 2 AM
+            ("credential_reset", {"hour": "*/12", "minute": 0})
         ]
         for job_id, default_schedule in jobs:
             schedule = config.JOB_SCHEDULES.get(job_id, default_schedule)

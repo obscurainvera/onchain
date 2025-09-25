@@ -241,63 +241,53 @@ class CredentialsHandler(BaseDBHandler):
             logger.error(f"Failed to update API key credits for key {keyId}: {str(e)}")
             return False
 
-    def resetCredentialsDueForReset(self) -> Dict[str, int]:
-        """
-        Reset all credentials that are due for reset using a single UPDATE query.
-        This is much more efficient than individual updates.
-        
-        Returns:
-            Dict with reset statistics
-        """
+    def resetCredentialsDueForReset(self) -> None:
         try:
-            current_time = datetime.now()
-            
-            # Build dynamic CASE statements from ServiceCredentials enum
-            credit_cases = []
-            interval_cases = []
-            params = [current_time]  # for lastresetat
-            
-            for service in ServiceCredentials:
-                if service.reset_duration_days and service.requires_credits:
-                    default_credits = service.metadata.get("default_credits", 1000)
-                    credit_cases.append(f"WHEN servicename = '{service.service_name}' THEN {default_credits}")
-                    interval_cases.append(f"WHEN servicename = '{service.service_name}' THEN %s + INTERVAL '{service.reset_duration_days} days'")
-                    params.append(current_time)  # for nextresetat calculation
-            
-            # Build the complete query
-            credit_case_sql = "CASE " + " ".join(credit_cases) + " ELSE availablecredits END"
-            interval_case_sql = "CASE " + " ".join(interval_cases) + " ELSE nextresetat END"
-            
-            query = f"""
-                UPDATE servicecredentials 
-                SET availablecredits = {credit_case_sql},
-                    lastresetat = %s,
-                    nextresetat = {interval_case_sql},
-                    updatedat = %s
-                WHERE isactive = 1 
-                AND isresetavailable = TRUE 
-                AND nextresetat IS NOT NULL 
-                AND nextresetat <= %s
-            """
-            
-            # Add remaining parameters
-            params.extend([current_time, current_time])  # for updatedat and WHERE clause
+            currentTime = datetime.now()
+            query, parameters = self.buildResetQuery(currentTime)
             
             with self.conn_manager.transaction() as cursor:
-                cursor.execute(text(query), params)
+                cursor.execute(text(query), parameters)
+                rowsAffected = cursor.rowcount
                 
-                rows_affected = cursor.rowcount
-                logger.info(f"Reset {rows_affected} credentials due for reset")
-                
-                return {
-                    "credentials_reset": rows_affected,
-                    "success": True
-                }
+                logger.info(f"Reset {rowsAffected} credentials due for reset")
                 
         except Exception as e:
             logger.error(f"Failed to reset credentials: {str(e)}")
-            return {
-                "credentials_reset": 0,
-                "success": False,
-                "error": str(e)
-            }
+
+    def buildResetQuery(self, currentTime: datetime) -> tuple[str, list]:
+        creditCases = []
+        intervalCases = []
+        parameters = [currentTime]  # for lastResetAt
+        
+        # Build CASE statements for each service that needs reset
+        for service in ServiceCredentials:
+            if self.shouldResetCredit(service):
+                defaultCredits = service.metadata.get("default_credits", 1000)
+                creditCases.append(f"WHEN servicename = '{service.service_name}' THEN {defaultCredits}")
+                intervalCases.append(f"WHEN servicename = '{service.service_name}' THEN %s + INTERVAL '{service.reset_duration_days} days'")
+                parameters.append(currentTime)  # for nextResetAt calculation
+        
+        # Build the complete SQL query
+        creditCaseSql = "CASE " + " ".join(creditCases) + " ELSE availablecredits END"
+        intervalCaseSql = "CASE " + " ".join(intervalCases) + " ELSE nextresetat END"
+        
+        query = f"""
+            UPDATE servicecredentials 
+            SET availablecredits = {creditCaseSql},
+                lastresetat = %s,
+                nextresetat = {intervalCaseSql},
+                updatedat = %s
+            WHERE isactive = 1 
+            AND isresetavailable = TRUE 
+            AND nextresetat IS NOT NULL 
+            AND nextresetat <= %s
+        """
+        
+        # Add remaining parameters
+        parameters.extend([currentTime, currentTime])  # for updatedAt and WHERE clause
+        
+        return query, parameters
+
+    def shouldResetCredit(self, service: ServiceCredentials) -> bool:
+        return service.reset_duration_days and service.requires_credits

@@ -9,48 +9,11 @@ class CredentialType(Enum):
     CHAT_ID = "CHAT_ID"
 
 class ServiceCredentials(Enum):
-    """
-    Enum mapping services to their credential types and metadata
-    """
     
-    OPENAI = {
-        "service_name": "openai",
-        "credential_type": CredentialType.API_KEY,
-        "requires_credits": True,
-        "reset_duration_days": None,  # No automatic reset
-        "metadata": {
-            "base_url": "https://api.openai.com/v1",
-            "models": ["gpt-3.5-turbo", "gpt-4"]
-        }
-    }
-    
-    CHAINEDGE = {
-        "service_name": "chainedge",
-        "credential_type": CredentialType.USER_PASS,
-        "requires_credits": False,
-        "reset_duration_days": None,  # No automatic reset
-        "metadata": {
-            "base_url": "https://trading-api-ce111.chainedge.io/api",
-            "web_url": "https://trading.chainedge.io"
-        }
-    }
-    
-    SOLSCAN = {
-        "service_name": "solscan",
-        "credential_type": CredentialType.API_KEY,
-        "requires_credits": True,
-        "reset_duration_days": None,  # Reset every 30 days
-        "metadata": {
-            "base_url": "https://api.solscan.io",
-            "rate_limit": 100,
-            "default_credits": 5000
-        }
-    }
-
     CIELO = {
         "service_name": "cielo",
         "credential_type": CredentialType.API_KEY,
-        "requires_credits": True,
+        "requires_credits": False,
         "reset_duration_days": None,  # Reset every 7 days
         "metadata": {
             "base_url": "https://feed-api.cielo.finance/api/v1",
@@ -75,7 +38,7 @@ class ServiceCredentials(Enum):
     BIRDEYE = {
         "service_name": "birdeye",
         "credential_type": CredentialType.API_KEY,
-        "requires_credits": True,
+        "requires_credits": False,
         "reset_duration_days": None,  # Reset daily
         "metadata": {
             "base_url": "https://public-api.birdeye.so",
