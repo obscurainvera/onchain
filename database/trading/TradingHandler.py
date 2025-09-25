@@ -10,7 +10,7 @@ from sqlalchemy import text
 from enum import IntEnum
 from datetime import datetime, timezone, timedelta
 from actions.TradingActionUtil import TradingActionUtil
-from scheduler.SchedulerConstants import CandleDataKeys, Timeframes
+from scheduler.SchedulerConstants import CandleDataKeys
 from constants.TradingConstants import TimeframeConstants
 
 import time

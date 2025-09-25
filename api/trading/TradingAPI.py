@@ -11,6 +11,7 @@ from api.trading.TradingAPIUtil import TradingAPIUtil
 from constants.TradingConstants import TimeframeConstants, TokenFlowConstants, ValidationMessages
 import time
 
+from scheduler.CredentialResetScheduler import CredentialResetScheduler
 from scheduler.TradingScheduler import TradingScheduler
 
 logger = get_logger(__name__)

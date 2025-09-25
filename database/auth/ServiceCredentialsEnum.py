@@ -9,48 +9,17 @@ class CredentialType(Enum):
     CHAT_ID = "CHAT_ID"
 
 class ServiceCredentials(Enum):
-    """
-    Enum mapping services to their credential types and metadata
-    """
     
-    OPENAI = {
-        "service_name": "openai",
-        "credential_type": CredentialType.API_KEY,
-        "requires_credits": True,
-        "metadata": {
-            "base_url": "https://api.openai.com/v1",
-            "models": ["gpt-3.5-turbo", "gpt-4"]
-        }
-    }
-    
-    CHAINEDGE = {
-        "service_name": "chainedge",
-        "credential_type": CredentialType.USER_PASS,
-        "requires_credits": False,
-        "metadata": {
-            "base_url": "https://trading-api-ce111.chainedge.io/api",
-            "web_url": "https://trading.chainedge.io"
-        }
-    }
-    
-    SOLSCAN = {
-        "service_name": "solscan",
-        "credential_type": CredentialType.API_KEY,
-        "requires_credits": True,
-        "metadata": {
-            "base_url": "https://api.solscan.io",
-            "rate_limit": 100
-        }
-    }
-
     CIELO = {
         "service_name": "cielo",
         "credential_type": CredentialType.API_KEY,
-        "requires_credits": True,
+        "requires_credits": False,
+        "reset_duration_days": None,  # Reset every 7 days
         "metadata": {
             "base_url": "https://feed-api.cielo.finance/api/v1",
             "credits_per_call": 3,
-            "rate_limit": 100
+            "rate_limit": 100,
+            "default_credits": 5000
         }
     }
 
@@ -58,6 +27,7 @@ class ServiceCredentials(Enum):
         "service_name": "telegram",
         "credential_type": CredentialType.API_KEY,
         "requires_credits": False,
+        "reset_duration_days": None,  # No automatic reset
         "metadata": {
             "base_url": "https://api.telegram.org/bot{token}/sendMessage",
             "description": "Telegram Bot API for sending notifications",
@@ -68,12 +38,14 @@ class ServiceCredentials(Enum):
     BIRDEYE = {
         "service_name": "birdeye",
         "credential_type": CredentialType.API_KEY,
-        "requires_credits": True,
+        "requires_credits": False,
+        "reset_duration_days": None,  # Reset daily
         "metadata": {
             "base_url": "https://public-api.birdeye.so",
             "credits_per_call": 40,
             "rate_limit": 60,
-            "description": "BirdEye API for Solana token OHLCV data"
+            "description": "BirdEye API for Solana token OHLCV data",
+            "default_credits": 30000
         }
     }
 
@@ -81,13 +53,15 @@ class ServiceCredentials(Enum):
         "service_name": "moralis",
         "credential_type": CredentialType.API_KEY,
         "requires_credits": True,
+        "reset_duration_days": 2,
         "metadata": {
             "base_url": "https://solana-gateway.moralis.io",
             "credits_per_call": 150,
             "rate_limit": 30,
             "description": "Moralis API for token OHLCV data across multiple chains",
             "supported_timeframes": ["1s", "10s", "30s", "1min", "5min", "10min", "30min", "1h", "4h", "12h", "1d", "1w", "1M"],
-            "default_chain": "mainnet"
+            "default_chain": "mainnet",
+            "default_credits": 39000
         }
     }
 
@@ -95,6 +69,7 @@ class ServiceCredentials(Enum):
         self.service_name = config["service_name"]
         self.credential_type = config["credential_type"]
         self.requires_credits = config["requires_credits"]
+        self.reset_duration_days = config.get("reset_duration_days")
         self.metadata = config["metadata"]
 
     @classmethod
