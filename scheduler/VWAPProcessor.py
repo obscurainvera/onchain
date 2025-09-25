@@ -44,19 +44,14 @@ KEY SIMPLIFICATIONS:
 - Simplified 4-step process: initialize → iterate → calculate → update
 """
 
-from typing import Dict, List, Any
+from typing import List
 from decimal import Decimal
 
 from logs.logger import get_logger
 from database.trading.TradingHandler import TradingHandler
-from scheduler.SchedulerConstants import CandleDataKeys
 from utils.CommonUtil import CommonUtil
 import time
-from actions.TradingActionUtil import TradingActionUtil
-from constants.TradingHandlerConstants import TradingHandlerConstants
-from utils.IndicatorConstants import IndicatorConstants
 from api.trading.request.VWAPSession import VWAPSession
-from api.trading.request.TrackedToken import TrackedToken
 
 logger = get_logger(__name__)
 
