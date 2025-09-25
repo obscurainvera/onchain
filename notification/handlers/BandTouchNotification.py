@@ -58,9 +58,6 @@ class BandTouchNotification:
                 touchCount=alert.touchCount,
                 unixTime=candle.unixTime,
                 time=NotificationUtil.formatUnixTime(candle.unixTime),
-                volume24h=NotificationUtil.getVolume24h(trackedToken),
-                marketCap=NotificationUtil.getMarketCap(trackedToken),
-                priceChange24h=NotificationUtil.getPriceChange24h(candle),
                 strategyType=BandTouchDefaults.STRATEGY_TYPE,
                 signalType=BandTouchFields.SIGNAL_TYPE,
                 dexScreenerUrl=BandTouchUrls.DEXSCREENER_BASE.format(tokenAddress=trackedToken.tokenAddress)

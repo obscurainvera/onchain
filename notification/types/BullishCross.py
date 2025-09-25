@@ -38,6 +38,8 @@ class BullishCross:
         formatted += f"<b>Signal:</b> MA{data.shortMa} crossed above MA{data.longMa}\n"
         formatted += f"<b>Timeframe:</b> {data.timeframe}\n"
         formatted += f"<b>Current Price:</b> ${data.currentPrice:,.6f}\n"
+        formatted += f"<b>Time:</b> {data.time}\n"
+
         
         if data.marketCap:
             if data.marketCap >= 1_000_000:
@@ -56,10 +58,6 @@ class BullishCross:
         buttons = []
         if data.dexScreenerUrl:
             buttons.append(MessageButton("📊 DexScreener", data.dexScreenerUrl))
-        if data.chartUrl:
-            buttons.append(MessageButton("📈 Chart", data.chartUrl))
-        if data.tradingUrl:
-            buttons.append(MessageButton("🔄 Trade", data.tradingUrl))
         
         return CommonMessage(
             formattedMessage=formatted,

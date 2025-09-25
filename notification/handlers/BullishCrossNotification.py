@@ -63,9 +63,6 @@ class BullishCrossNotification:
             currentPrice=float(candle.closePrice),
             unixTime=candle.unixTime,
             time=NotificationUtil.formatUnixTime(candle.unixTime),
-            volume24h=NotificationUtil.getVolume24h(trackedToken),
-            marketCap=NotificationUtil.getMarketCap(trackedToken),
-            priceChange24h=NotificationUtil.getPriceChange24h(candle),
             strategyType=BullishCrossDefaults.STRATEGY_TYPE,
             dexScreenerUrl=BullishCrossNotification.buildDexScrennerUrl(trackedToken.tokenAddress)
         )

@@ -39,6 +39,7 @@ class BandTouch:
         formatted += f"<b>Touch Count:</b> #{data.touchCount}\n"
         formatted += f"<b>Timeframe:</b> {data.timeframe}\n"
         formatted += f"<b>Current Price:</b> ${data.currentPrice:,.6f}\n"
+        formatted += f"<b>Time:</b> {data.time}\n"
         
         if data.marketCap:
             if data.marketCap >= 1_000_000:
