@@ -221,10 +221,6 @@ def listTokens():
   
    try:
         # Parse query parameters
-
-        CredentialResetScheduler().processCredentialResets()
-
-
         status = request.args.get('status', 'active').lower()
         limit = int(request.args.get('limit', 100))
         offset = int(request.args.get('offset', 0))
