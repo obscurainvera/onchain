@@ -1,5 +1,4 @@
 from config.Config import get_config
-from decimal import Decimal
 from typing import Dict, List, Optional, Tuple, TYPE_CHECKING
 from datetime import datetime
 import json
@@ -8,10 +7,8 @@ from database.operations.DatabaseConnectionManager import DatabaseConnectionMana
 from logs.logger import get_logger
 from sqlalchemy import text
 from enum import IntEnum
-from datetime import datetime, timezone, timedelta
-from actions.TradingActionUtil import TradingActionUtil
-from scheduler.SchedulerConstants import CandleDataKeys
-from constants.TradingConstants import TimeframeConstants
+from datetime import datetime, timezone
+
 
 import time
 from utils.CommonUtil import CommonUtil

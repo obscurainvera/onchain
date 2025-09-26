@@ -181,8 +181,8 @@ def listTokens():
         return jsonify({}), 200
     
     try:
-        trasdingscheduler = TradingScheduler()
-        trasdingscheduler.handleTradingUpdatesFromJob()
+        # trasdingscheduler = TradingScheduler()
+        # trasdingscheduler.handleTradingUpdatesFromJob()
        
         # Parse query parameters
         status = request.args.get('status', 'active').lower()

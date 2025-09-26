@@ -86,7 +86,7 @@ class JobRunner:
             self.scheduler.add_listener(
                 self._job_listener, EVENT_JOB_ERROR | EVENT_JOB_EXECUTED
             )
-            # self.setup_jobs()
+            self.setup_jobs()
             logger.info("JobRunner initialized")
         except Exception as e:
             logger.error(f"Failed to initialize JobRunner: {e}")

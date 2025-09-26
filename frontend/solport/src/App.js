@@ -1,8 +1,6 @@
 import React from 'react';
 import { BrowserRouter as Router, Routes, Route, Link, NavLink } from 'react-router-dom';
 import 'bootstrap/dist/css/bootstrap.min.css';
-import Home from './components/Home';
-import TradingAttentionReport from './components/TradingAttentionReport';
 import PortfolioCalculator from './components/PortfolioCalculator';
 import TokenAddPage from './components/TokenAddPage';
 import TokenListPage from './components/TokenListPage';
@@ -22,8 +20,6 @@ function App() {
             </Link>
           </div>
           <nav>
-            <NavLink to="/" className={({ isActive }) => isActive ? "App-link active" : "App-link"} end>Home</NavLink>
-            <NavLink to="/tradingattention" className={({ isActive }) => isActive ? "App-link active" : "App-link"}>Trading Attention</NavLink>
             <NavLink to="/calculator" className={({ isActive }) => isActive ? "App-link active" : "App-link"}>Calculator</NavLink>
             <NavLink to="/addtoken" className={({ isActive }) => isActive ? "App-link active" : "App-link"}>Add Token</NavLink>
             <NavLink to="/tokens" className={({ isActive }) => isActive ? "App-link active" : "App-link"}>Token List</NavLink>
@@ -32,8 +28,7 @@ function App() {
         </header>
         <main className="container fade-in">
           <Routes>
-            <Route path="/" element={<Home />} />
-            <Route path="/tradingattention" element={<TradingAttentionReport />} />
+            <Route path="/" element={<TokenListPage />} />
             <Route path="/calculator" element={<PortfolioCalculator />} />
             <Route path="/addtoken" element={<TokenAddPage />} />
             <Route path="/tokens" element={<TokenListPage />} />

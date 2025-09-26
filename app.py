@@ -17,6 +17,8 @@ from psycopg2.extras import RealDictCursor
 from flask import Flask, jsonify, render_template, request, send_from_directory
 from flask_cors import CORS
 
+from database.trading.TradingHandler import TradingHandler
+
 # Load environment variables
 load_dotenv()
 
@@ -33,57 +35,10 @@ from database.operations.PortfolioDB import PortfolioDB
 from database.operations.DatabaseConnectionManager import DatabaseConnectionManager
 
 # Handler imports
-from database.attention.AttentionHandler import AttentionHandler
 from database.auth.CredentialsHandler import CredentialsHandler
 from database.auth.TokenHandler import TokenHandler
 from database.job.job_handler import JobHandler
 from database.notification.NotificationHandler import NotificationHandler
-from database.portsummary.PortfolioHandler import PortfolioHandler
-from database.pumpfun.PumpfunHandler import PumpFunHandler
-from database.smartmoneywallets.SMWalletTopPNLTokenHandler import SMWalletTopPNLTokenHandler
-from database.smartmoneywallets.SmartMoneyPerformanceReportHandler import SmartMoneyPerformanceReportHandler
-from database.smartmoneywallets.SmartMoneyWalletsHandler import SmartMoneyWalletsHandler
-from database.smwalletsbehaviour.SmartMoneyWalletBehaviourHandler import SmartMoneyWalletBehaviourHandler
-from database.volume.VolumeHandler import VolumeHandler
-from database.onchain.OnchainHandler import OnchainHandler
-from database.walletinvested.WalletsInvestedHandler import WalletsInvestedHandler
-from database.tradingattention.TradingAttentionHandler import TradingAttentionHandler
-from framework.analyticshandlers.AnalyticsHandler import AnalyticsHandler
-
-# Blueprint imports
-from api.walletsinvested.WalletsInvestedAPI import wallets_invested_bp
-from api.walletsinvested.WalletsInvestedInvestmentDetailsAPI import wallets_invested_investement_details_bp
-from api.portsummary.PortfolioAPI import portfolio_bp
-from api.operations.HealthAPI import health_bp
-from api.operations.DashboardAPI import dashboard_bp
-from api.operations.AnalyticsAPI import analytics_bp
-from api.smartmoney.SmartMoneyWalletsAPI import smart_money_wallets_bp
-from api.smartmoney.SMWalletTopPNLTokenAPI import smwallet_top_pnl_token_bp
-from api.smartmoney.SMWalletTopPNLTokenInvestmentAPI import smwallet_top_pnl_token_investment_bp
-from api.attention.AttentionAPI import attention_bp
-from api.volume.VolumebotAPI import volumebot_bp
-from api.pumpfun.PumpfunAPI import pumpfun_bp  
-from api.operations.SchedulerAPI import scheduler_bp
-from api.portsummary.PortfolioTaggerAPI import portfolio_tagger_bp
-from api.analyticsframework.CreateStrategyAPI import strategy_bp
-from api.analyticsframework.PushTokenFrameworkAPI import push_token_bp
-from api.operations.StrategyAPI import strategy_page_bp
-from api.analyticsframework.ExecutionMonitorAPI import execution_monitor_bp
-from api.smartmoneywalletsbehaviour.SmartMoneyWalletsBehaviourAPI import smartMoneyWalletBehaviourBp
-from api.operations.ReportsAPI import reports_page_bp
-from api.portsummary.PortSummaryReportAPI import port_summary_report_bp
-from api.smartmoney.SmartMoneyWalletsReportAPI import smartMoneyWalletsReportBp
-from api.smartmoney.SmartMoneyPerformanceReportAPI import smartMoneyPerformanceReportBp
-from api.strategyreport.StrategyReportAPI import strategy_report_bp
-from api.strategyreport.StrategyPerformanceAPI import strategyperformance_bp
-from api.smwalletsbehaviour.SMWalletBehaviourReportAPI import smwalletBehaviourReportBp
-from api.smwalletsbehaviour.SMWalletInvestmentRangeReportAPI import smwallet_investment_range_report_bp
-from api.portfolioallocation.PortfolioAllocationAPI import portfolio_allocation_bp
-from api.attention.AttentionReportAPI import attention_report_bp
-from api.dexscrenner.DexScrennerAPI import dexscrenner_bp
-from api.onchain.OnchainAPI import onchain_bp
-from api.tradingattention.TradingAttentionAPI import tradingattention_bp
-from api.tradingattention.TradingAttentionReportAPI import trading_attention_report_bp
 from api.trading.TradingAPI import trading_bp
 
 logger = get_logger(__name__)
@@ -134,22 +89,11 @@ def initialize_database():
         # Initialize application-specific tables
         conn_manager = DatabaseConnectionManager()
         handlers = {
-            'PortfolioHandler': PortfolioHandler,
-            'WalletsInvestedHandler': WalletsInvestedHandler,
             'JobHandler': JobHandler,
-            'SmartMoneyWalletsHandler': SmartMoneyWalletsHandler,
-            'SMWalletTopPNLTokenHandler': SMWalletTopPNLTokenHandler,
-            'SmartMoneyPerformanceReportHandler': SmartMoneyPerformanceReportHandler,
-            'AttentionHandler': AttentionHandler,
-            'TradingAttentionHandler': TradingAttentionHandler,
-            'VolumeHandler': VolumeHandler,
-            'OnchainHandler': OnchainHandler,
-            'PumpFunHandler': PumpFunHandler,
             'TokenHandler': TokenHandler,
             'CredentialsHandler': CredentialsHandler,
-            'AnalyticsHandler': AnalyticsHandler,
             'NotificationHandler': NotificationHandler,
-            'SmartMoneyWalletBehaviourHandler': SmartMoneyWalletBehaviourHandler
+            'TradingHandler': TradingHandler
         }
         for name, handler_class in handlers.items():
             try:
@@ -207,15 +151,6 @@ class PortfolioApp:
     def _register_blueprints(self):
         """Register all API blueprints for modular route management."""
         blueprints = [
-            wallets_invested_bp, wallets_invested_investement_details_bp, portfolio_bp,
-            health_bp, dashboard_bp, analytics_bp, smart_money_wallets_bp,
-            smwallet_top_pnl_token_bp, smwallet_top_pnl_token_investment_bp, attention_bp,
-            volumebot_bp, pumpfun_bp, onchain_bp, scheduler_bp, portfolio_tagger_bp, strategy_bp,
-            push_token_bp, strategy_page_bp, execution_monitor_bp, smartMoneyWalletBehaviourBp,
-            reports_page_bp, port_summary_report_bp, smartMoneyWalletsReportBp,
-            smartMoneyPerformanceReportBp, strategy_report_bp, strategyperformance_bp,
-            smwalletBehaviourReportBp, smwallet_investment_range_report_bp, portfolio_allocation_bp,
-            attention_report_bp, dexscrenner_bp, tradingattention_bp, trading_attention_report_bp,
             trading_bp
         ]
         for bp in blueprints:

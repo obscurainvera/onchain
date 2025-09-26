@@ -57,17 +57,11 @@ BENEFITS:
 - Resilient to server downtime - no gaps in EMA calculations
 """
 
-from typing import Dict, List, Any, Optional, Tuple, TYPE_CHECKING
-from decimal import Decimal
-from constants.TradingAPIConstants import TradingAPIConstants
+from typing import List, TYPE_CHECKING
 from logs.logger import get_logger
 from database.trading.TradingHandler import TradingHandler
-from actions.TradingActionUtil import TradingActionUtil
 from utils.CommonUtil import CommonUtil
-from constants.TradingHandlerConstants import TradingHandlerConstants
 from database.trading.TradingHandler import EMAStatus
-from api.trading.request import TimeframeRecord
-from utils.IndicatorConstants import IndicatorConstants
 from database.trading.TradingHandler import EMAStatus
 from api.trading.request import EMAState
 

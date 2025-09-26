@@ -1,34 +1,12 @@
 from config.Config import get_config
-from database.operations.DatabaseConnectionManager import DatabaseConnectionManager
-from database.portsummary.PortfolioHandler import PortfolioHandler
-from database.smwalletsbehaviour.SmartMoneyWalletBehaviourHandler import (
-    SmartMoneyWalletBehaviourHandler,
-)
-from database.walletinvested.WalletsInvestedHandler import WalletsInvestedHandler
+from database.operations.DatabaseConnectionManager import DatabaseConnectionManager     
 from database.job.job_handler import JobHandler
-from database.smartmoneywallets.SmartMoneyWalletsHandler import SmartMoneyWalletsHandler
-from database.smartmoneywallets.SMWalletTopPNLTokenHandler import (
-    SMWalletTopPNLTokenHandler,
-)
-from database.smartmoneywallets.SmartMoneyPerformanceReportHandler import (
-    SmartMoneyPerformanceReportHandler,
-)
-from database.attention.AttentionHandler import AttentionHandler
-from database.volume.VolumeHandler import VolumeHandler
-from database.pumpfun.PumpfunHandler import PumpFunHandler
-from database.onchain.OnchainHandler import OnchainHandler
-from database.tradingattention.TradingAttentionHandler import TradingAttentionHandler
 from database.auth.TokenHandler import TokenHandler
 from database.auth.CredentialsHandler import CredentialsHandler
-from framework.analyticshandlers.AnalyticsHandler import AnalyticsHandler
 from database.notification.NotificationHandler import NotificationHandler
 from database.trading.TradingHandler import TradingHandler
 from typing import Optional, Any, List, Tuple
 from logs.logger import get_logger
-from framework.analyticsframework.models.BaseModels import (
-    ExecutionState,
-    BaseStrategyConfig,
-)
 from sqlalchemy import text
 
 import sys
@@ -104,44 +82,19 @@ class PortfolioDB:
 
         # Initialize handlers
         self._handlers = {
-            "portfolio": PortfolioHandler(self.conn_manager),
-            "walletsInvested": WalletsInvestedHandler(self.conn_manager),
             "job": JobHandler(self.conn_manager),
-            "smartMoneyWallets": SmartMoneyWalletsHandler(self.conn_manager),
-            "smWalletTopPNLToken": SMWalletTopPNLTokenHandler(self.conn_manager),
-            "smartMoneyPerformanceReport": SmartMoneyPerformanceReportHandler(
-                self.conn_manager
-            ),
-            "attention": AttentionHandler(self.conn_manager),
-            "volume": VolumeHandler(self.conn_manager),
-            "pumpfun": PumpFunHandler(self.conn_manager),
-            "onchain": OnchainHandler(self.conn_manager),
-            "tradingattention": TradingAttentionHandler(self.conn_manager),
             "token": TokenHandler(self.conn_manager),
             "credentials": CredentialsHandler(self.conn_manager),
-            "analytics": AnalyticsHandler(self.conn_manager),
             "notification": NotificationHandler(self.conn_manager),
-            "smWalletBehaviour": SmartMoneyWalletBehaviourHandler(self.conn_manager),
             "trading": TradingHandler(self.conn_manager),
         }
 
         # Set direct properties for commonly used handlers for ease of access
-        self.portfolio = self._handlers["portfolio"]
-        self.walletsInvested = self._handlers["walletsInvested"]
+        
         self.job = self._handlers["job"]
-        self.smartMoneyWallets = self._handlers["smartMoneyWallets"]
-        self.smWalletTopPNLToken = self._handlers["smWalletTopPNLToken"]
-        self.smartMoneyPerformanceReport = self._handlers["smartMoneyPerformanceReport"]
-        self.attention = self._handlers["attention"]
-        self.volume = self._handlers["volume"]
-        self.pumpfun = self._handlers["pumpfun"]
-        self.onchain = self._handlers["onchain"]
-        self.tradingattention = self._handlers["tradingattention"]
         self.token = self._handlers["token"]
         self.credentials = self._handlers["credentials"]
-        self.analytics = self._handlers["analytics"]
         self.notification = self._handlers["notification"]
-        self.smWalletBehaviour = self._handlers["smWalletBehaviour"]
         self.trading = self._handlers["trading"]
 
         # Also create a handler map for getattr fallback lookup
@@ -302,17 +255,8 @@ class PortfolioDB:
         """
         # Map logical handler names to actual handler keys
         handler_mapping = {
-            "portfolio": "portfolio",
-            "port_summary_report": "portfolio",
-            "token_analysis": "walletsInvested",
             "jobs": "job",
-            "wallet_behaviour": "smartMoneyWallets",
-            "top_pnl_token": "smWalletTopPNLToken",
-            "attention": "attention",
-            "volume": "volume",
-            "pumpfun": "pumpfun",
-            "analytics": "analytics",
-            "smWalletBehaviour": "smWalletBehaviour",
+            
         }
 
         handler_key = handler_mapping.get(handler_type, handler_type)

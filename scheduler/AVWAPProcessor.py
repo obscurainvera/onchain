@@ -33,21 +33,14 @@ USAGE:
 - Maintains consistency with existing processor patterns
 """
 
-from typing import Dict, Any, List, TYPE_CHECKING
-from decimal import Decimal
-import time
+from typing import List, TYPE_CHECKING
 from logs.logger import get_logger
-from constants.TradingHandlerConstants import TradingHandlerConstants
-from constants.TradingAPIConstants import TradingAPIConstants
-from actions.TradingActionUtil import TradingActionUtil
+
 from utils.CommonUtil import CommonUtil
-from utils.IndicatorConstants import IndicatorConstants
-from constants.TradingConstants import TimeframeConstants, TokenFlowConstants
-from scheduler.SchedulerConstants import CandleDataKeys
 from api.trading.request.AVWAPState import AVWAPState
 
 if TYPE_CHECKING:
-    from api.trading.request import TrackedToken, TimeframeRecord
+    from api.trading.request import TrackedToken
 
 logger = get_logger(__name__)
 
