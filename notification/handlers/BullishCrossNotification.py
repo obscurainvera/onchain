@@ -72,39 +72,4 @@ class BullishCrossNotification:
         except Exception:
             return None
 
-    @staticmethod
-    def testingNotis():
-        try:
-            trackedToken = TrackedToken(
-                trackedTokenId=1,
-                symbol="SOL",
-                tokenAddress="0x0000000000000000000000000000000000000000",
-                name="SOL",
-                pairAddress="0x0000000000000000000000000000000000000000"
-            
-            )
-            timeframeRecord = TimeframeRecord(
-                timeframeId=1,
-                tokenAddress="0x0000000000000000000000000000000000000000",
-                pairAddress="0x0000000000000000000000000000000000000000",
-                timeframe="1h",
-                nextFetchAt=1717171717,
-                lastFetchedAt=1717171717,
-                isActive=True
-            )
-            candle = OHLCVDetails(
-                timeframeId=1,
-                tokenAddress="0x0000000000000000000000000000000000000000",
-                pairAddress="0x0000000000000000000000000000000000000000",
-                timeframe="1h",
-                unixTime=1717171717,
-                timeBucket=1717171717,
-                openPrice=100.0,
-                highPrice=100.0,
-                lowPrice=100.0,
-                closePrice=100.0,
-                volume=100.0
-            )   
-            BullishCrossNotification.sendAlert("ONCHAIN_SUSTAINING_CHAT", trackedToken, timeframeRecord, candle)
-        except Exception as e:
-            logger.error(f"Error in testingNotis: {e}")
+    
