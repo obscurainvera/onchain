@@ -29,6 +29,7 @@ class TimeframeRecord:
     # Integrated data with proper typing
     ohlcvDetails: List['OHLCVDetails'] = field(default_factory=list)
     vwapSession: Optional['VWAPSession'] = None
+    ema12State: Optional['EMAState'] = None
     ema21State: Optional['EMAState'] = None
     ema34State: Optional['EMAState'] = None
     avwapState: Optional['AVWAPState'] = None

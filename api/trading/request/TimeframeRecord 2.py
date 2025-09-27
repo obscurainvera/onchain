@@ -8,7 +8,12 @@ from typing import Optional, List
 
 @dataclass
 class TimeframeRecord:
-    """POJO for timeframe metadata records"""
+    """POJO for timeframe metadata records
+    
+    Note: This is a basic version without indicator integration.
+    For EMA 12 support, use the main TimeframeRecord.py which includes
+    ema12State, ema21State, ema34State, etc.
+    """
     
     id: Optional[int] = None
     tokenAddress: str = ""

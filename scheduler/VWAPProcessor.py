@@ -211,12 +211,12 @@ class VWAPProcessor:
             
             for candle in todayCandles:
                 # Calculate typical price (HLC/3)
-                typicalPrice = (candle.highPrice + candle.lowPrice + candle.closePrice) / Decimal('3')
-                priceVolume = typicalPrice * candle.volume
+                typicalPrice = (Decimal(str(candle.highPrice)) + Decimal(str(candle.lowPrice)) + Decimal(str(candle.closePrice))) / Decimal('3')
+                priceVolume = typicalPrice * Decimal(str(candle.volume))
                 
                 # Update cumulative values
                 cumulativePV += priceVolume
-                cumulativeVolume += candle.volume
+                cumulativeVolume += Decimal(str(candle.volume))
                 
                 # Calculate current VWAP and update the candle
                 if cumulativeVolume > 0:

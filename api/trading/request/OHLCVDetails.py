@@ -29,12 +29,15 @@ class OHLCVDetails:
     # Indicator values (calculated in memory)
     vwapValue: Optional[float] = None
     avwapValue: Optional[float] = None
+    ema12Value: Optional[float] = None
     ema21Value: Optional[float] = None
     ema34Value: Optional[float] = None
     
     # Alert-related fields
     trend: Optional[str] = None
     status: Optional[str] = None
+    trend12: Optional[str] = None
+    status12: Optional[str] = None
     
     def updateVWAPValue(self, vwapValue: float):
         """Update VWAP value for this candle"""
@@ -44,10 +47,25 @@ class OHLCVDetails:
         """Update AVWAP value for this candle"""
         self.avwapValue = avwapValue
     
-    def updateEMAValues(self, ema21Value: float, ema34Value: float):
+    def updateEMA12Value(self, ema12Value: float):
+        """Update EMA 12 value for this candle"""
+        self.ema12Value = ema12Value
+    
+    def updateEMA12TrendStatus(self, trend12: str = None, status12: str = None):
+        """Update EMA 12 trend and status for this candle"""
+        if trend12 is not None:
+            self.trend12 = trend12
+        if status12 is not None:
+            self.status12 = status12
+    
+    def updateEMAValues(self, ema12Value: float = None, ema21Value: float = None, ema34Value: float = None):
         """Update EMA values for this candle"""
-        self.ema21Value = ema21Value
-        self.ema34Value = ema34Value
+        if ema12Value is not None:
+            self.ema12Value = ema12Value
+        if ema21Value is not None:
+            self.ema21Value = ema21Value
+        if ema34Value is not None:
+            self.ema34Value = ema34Value
     
     def toDict(self) -> dict:
         """Convert to dictionary for database insertion"""
@@ -66,10 +84,13 @@ class OHLCVDetails:
             'trades': self.trades,
             'vwapvalue': self.vwapValue,
             'avwapvalue': self.avwapValue,
+            'ema12value': self.ema12Value,
             'ema21value': self.ema21Value,
             'ema34value': self.ema34Value,
             'trend': self.trend,
             'status': self.status,
+            'trend12': self.trend12,
+            'status12': self.status12,
             'iscomplete': self.isComplete,
             'datasource': self.dataSource
         }

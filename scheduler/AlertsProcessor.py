@@ -34,18 +34,70 @@ class AlertsProcessor:
         self.tradingHandler = tradingHandler
         self.TOUCH_THRESHOLD_SECONDS = 7200  # 2 hours
     
-    def calculateTrend(self, ema21Value: Optional[float], ema34Value: Optional[float]) -> str:
-        if ema21Value is None:
+    def calculateTrend(self, fastEMA: Optional[float], slowEMA: Optional[float]) -> str:
+        if fastEMA is None:
             return TrendType.NEUTRAL.value
         
-        if (ema21Value >= ema34Value) or (ema34Value is None):
+        if (fastEMA >= slowEMA) or (slowEMA is None):
             return TrendType.BULLISH.value
-        elif ema21Value < ema34Value:
+        elif fastEMA < slowEMA:
             return TrendType.BEARISH.value
         else:
             return TrendType.NEUTRAL.value
     
-    def calculateStatus(self, candle: 'OHLCVDetails') -> str:
+    def processAlertNotifications(self, existingAlert: 'Alert', candle: 'OHLCVDetails', 
+                                previousTrend: Optional[str], currentTrend: Optional[str],
+                                previousTrend12: Optional[str], currentTrend12: Optional[str],
+                                trackedToken: 'TrackedToken', timeframeRecord: 'TimeframeRecord',
+                                trendType: str = 'ema23') -> None:
+    
+        tokenAddress = trackedToken.tokenAddress
+        
+        # Process EMA 21/34 notifications (default)
+        if trendType == 'ema23' and previousTrend and currentTrend:
+            if existingAlert.isBullishCross(previousTrend, currentTrend):
+                # Bullish cross detected - send notification
+                existingAlert.latestTouchUnix = candle.unixTime
+                existingAlert.touchCount = 0
+                logger.info(f"Bullish cross detected for {tokenAddress} {timeframeRecord.timeframe}")
+                self.sendBullishCrossNotification(ChatCredentials.BULLISH_CROSS_CHAT, trackedToken, timeframeRecord, candle)
+            
+            elif existingAlert.isBearishCross(previousTrend, currentTrend):
+                # Bearish cross detected
+                existingAlert.resetTouch()
+                logger.info(f"Bearish cross detected for {tokenAddress} {timeframeRecord.timeframe}")
+            
+            elif currentTrend == TrendType.BULLISH.value and previousTrend != TrendType.BEARISH.value:
+                # Check for EMA touches during bullish trend
+                if self.isEMATouched(candle) and existingAlert.shouldRecordTouch(candle.unixTime, self.TOUCH_THRESHOLD_SECONDS):
+                    existingAlert.recordTouch(candle.unixTime)
+                    logger.info(f"EMA touch recorded for {tokenAddress} {timeframeRecord.timeframe}")
+                    # Send band touch notification (only for first and second touches)
+                    self.sendBandTouchNotification(ChatCredentials.BAND_TOUCH_CHAT.value, trackedToken, timeframeRecord, candle, existingAlert)
+        
+        # Process EMA 12/21 notifications
+        elif trendType == 'ema12' and previousTrend12 and currentTrend12:
+            if existingAlert.isBullishCross(previousTrend12, currentTrend12):
+                # Bullish cross detected for EMA 12/21
+                existingAlert.latestTouchUnix12 = candle.unixTime
+                existingAlert.touchCount12 = 0
+                logger.info(f"EMA 12/21 Bullish cross detected for {tokenAddress} {timeframeRecord.timeframe}")
+                self.sendBullishCrossNotification(ChatCredentials.BULLISH_CROSS_CHAT, trackedToken, timeframeRecord, candle)
+            
+            elif existingAlert.isBearishCross(previousTrend12, currentTrend12):
+                # Bearish cross detected for EMA 12/21
+                existingAlert.resetTouch12()
+                logger.info(f"EMA 12/21 Bearish cross detected for {tokenAddress} {timeframeRecord.timeframe}")
+            
+            elif currentTrend12 == TrendType.BULLISH.value and previousTrend12 != TrendType.BEARISH.value:
+                # Check for EMA 12/21 touches during bullish trend
+                if self.isEMATouched(candle) and existingAlert.shouldRecordTouch12(candle.unixTime, self.TOUCH_THRESHOLD_SECONDS):
+                    existingAlert.recordTouch12(candle.unixTime)
+                    logger.info(f"EMA 12/21 touch recorded for {tokenAddress} {timeframeRecord.timeframe}")
+                    self.sendBandTouchNotification(ChatCredentials.BAND_TOUCH_CHAT.value, trackedToken, timeframeRecord, candle, existingAlert)
+
+    def calculateStatus(self, candle: 'OHLCVDetails', emaFastValue: Optional[float] = None, emaSlowValue: Optional[float] = None, 
+                       emaFastLabel: str = 'EMA21', emaSlowLabel: str = 'EMA34') -> str:
         """
         Format: {order_of_bands}_{current_band}{position}
         
@@ -66,10 +118,10 @@ class AlertsProcessor:
                 bands.append(BandInfo('AVWAP', float(candle.avwapValue)))
             if candle.vwapValue is not None:
                 bands.append(BandInfo('VWAP', float(candle.vwapValue)))
-            if candle.ema21Value is not None:
-                bands.append(BandInfo('EMA21', float(candle.ema21Value)))
-            if candle.ema34Value is not None:
-                bands.append(BandInfo('EMA34', float(candle.ema34Value)))
+            if emaFastValue is not None:
+                bands.append(BandInfo(emaFastLabel, float(emaFastValue)))
+            if emaSlowValue is not None:
+                bands.append(BandInfo(emaSlowLabel, float(emaSlowValue)))
             
             if not bands:
                 return "NONE_NA"
@@ -196,10 +248,7 @@ class AlertsProcessor:
     
     def processAlertsForToken(self, trackedToken: 'TrackedToken') -> None:
         for timeframeRecord in trackedToken.timeframeRecords: #processing timeframes in a token one by one
-            alert = self.processTimeframeAlert(
-                trackedToken,
-                timeframeRecord
-            )
+            alert = self.processTimeframeAlert(trackedToken,timeframeRecord)
             if alert:
                 timeframeRecord.alert = alert
     
@@ -224,6 +273,7 @@ class AlertsProcessor:
                 )
             
             previousTrend = existingAlert.trend
+            previousTrend12 = existingAlert.trend12
             
             # Process candles chronologically
             for candle in timeframeRecord.ohlcvDetails:
@@ -232,47 +282,45 @@ class AlertsProcessor:
                 
                 # Calculate trend
                 currentTrend = self.calculateTrend(candle.ema21Value, candle.ema34Value)
-                
+                currentTrend12 = self.calculateTrend(candle.ema12Value, candle.ema21Value)
                 # Calculate status
-                currentStatus = self.calculateStatus(candle)
+                currentStatus = self.calculateStatus(candle, candle.ema21Value, candle.ema34Value, 'EMA21', 'EMA34')
+                currentStatus12 = self.calculateStatus(candle, candle.ema12Value, candle.ema21Value, 'EMA12', 'EMA21')
                 
-                # Handle crosses and touches
-                if previousTrend and currentTrend:
-                    if existingAlert.isBullishCross(previousTrend, currentTrend):
-                        # Bullish cross detected - send notification
-                        existingAlert.latestTouchUnix = candle.unixTime
-                        existingAlert.touchCount = 0
-                        logger.info(f"Bullish cross detected for {tokenAddress} {timeframeRecord.timeframe}")
-                        self.sendBullishCrossNotification(ChatCredentials.BULLISH_CROSS_CHAT, trackedToken, timeframeRecord, candle)
-                    
-                    elif existingAlert.isBearishCross(previousTrend, currentTrend):
-                        # Bearish cross detected
-                        existingAlert.resetTouch()
-                        logger.info(f"Bearish cross detected for {tokenAddress} {timeframeRecord.timeframe}")
-                    
-                    elif currentTrend == TrendType.BULLISH.value and previousTrend != TrendType.BEARISH.value: # this is to check the candle that made the cross doesnt account for a touch
-                        # Check for EMA touches during bullish trend
-                        if self.isEMATouched(candle) and existingAlert.shouldRecordTouch(candle.unixTime, self.TOUCH_THRESHOLD_SECONDS):
-                            existingAlert.recordTouch(candle.unixTime)
-                            logger.info(f"EMA touch recorded for {tokenAddress} {timeframeRecord.timeframe}")
-                            # Send band touch notification (only for first and second touches)
-                            self.sendBandTouchNotification(ChatCredentials.BAND_TOUCH_CHAT.value, trackedToken, timeframeRecord, candle, existingAlert)
+                
+                # Handle crosses and touches using generic function
+                # Process EMA 21/34 notifications
+                self.processAlertNotifications(
+                    existingAlert, candle, previousTrend, currentTrend, 
+                    previousTrend12, currentTrend12, trackedToken, timeframeRecord, 'ema23'
+                )
+                
+                # Process EMA 12/21 notifications
+                self.processAlertNotifications(
+                    existingAlert, candle, previousTrend, currentTrend, 
+                    previousTrend12, currentTrend12, trackedToken, timeframeRecord, 'ema12'
+                )
 
                 
                 # Update indicator values in alert
                 existingAlert.updateIndicatorValues(
                     vwap=candle.vwapValue,
+                    ema12=candle.ema12Value,
                     ema21=candle.ema21Value,
                     ema34=candle.ema34Value,
                     avwap=candle.avwapValue
                 )
                 # Update trend and status
                 existingAlert.updateTrendAndStatus(currentTrend, currentStatus, candle.unixTime)
+                existingAlert.updateTrendAndStatus12(currentTrend12, currentStatus12, candle.unixTime)
                 
                 # Update candle with trend and status
                 candle.trend = currentTrend
                 candle.status = currentStatus
+                candle.trend12 = currentTrend12
+                candle.status12 = currentStatus12
                 previousTrend = currentTrend
+                previousTrend12 = currentTrend12
             
             return existingAlert
             
@@ -285,6 +333,11 @@ class AlertsProcessor:
         # VWAP and AVWAP must be available
         if candle.vwapValue is None or candle.avwapValue is None:
             return False
+
+        if timeframeRecord.ema12State and timeframeRecord.ema12State.emaAvailableTime:
+            if candle.unixTime >= timeframeRecord.ema12State.emaAvailableTime:
+                if candle.ema12Value is None:
+                    return False
         
         # Check EMA21 availability
         if timeframeRecord.ema21State and timeframeRecord.ema21State.emaAvailableTime:

@@ -115,10 +115,13 @@ class TradingHandler(BaseDBHandler):
                 trades INTEGER DEFAULT 0,
                 vwapvalue DECIMAL(20,8),
                 avwapvalue DECIMAL(20,8),
+                ema12value DECIMAL(20,8),
                 ema21value DECIMAL(20,8),
                 ema34value DECIMAL(20,8),
                 trend VARCHAR(20),
                 status VARCHAR(50),
+                trend12 VARCHAR(20),
+                status12 VARCHAR(50),
                 iscomplete BOOLEAN DEFAULT TRUE,
                 datasource VARCHAR(20) DEFAULT 'api',
                 createdat TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
@@ -194,14 +197,19 @@ class TradingHandler(BaseDBHandler):
                 pairaddress CHAR(44) NOT NULL,
                 timeframe VARCHAR(10) NOT NULL,
                 vwap DECIMAL(20,8),
+                ema12 DECIMAL(20,8),
                 ema21 DECIMAL(20,8),
                 ema34 DECIMAL(20,8),
                 avwap DECIMAL(20,8),
                 lastupdatedunix BIGINT,
                 trend VARCHAR(20),
                 status VARCHAR(50),
+                trend12 VARCHAR(20),
+                status12 VARCHAR(50),
                 touchcount INTEGER DEFAULT 0,
                 latesttouchunix BIGINT,
+                touchcount12 INTEGER DEFAULT 0,
+                latesttouchunix12 BIGINT,
                 createdat TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
                 lastupdatedat TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
                 UNIQUE(tokenaddress, timeframe)
@@ -400,7 +408,8 @@ class TradingHandler(BaseDBHandler):
                 
                 records = cursor.fetchall()
                 
-             
+                # Track seen candle timestamps per timeframe to prevent duplicates (space and time efficient)
+                seenCandles = {}  # {tokenAddress: {timeframe: set(unixTimes)}}
                 trackedTokensMap = {}
                 
                 for record in records:
@@ -451,22 +460,35 @@ class TradingHandler(BaseDBHandler):
                     
                     # Add candle data if available
                     if record[TradingHandlerConstants.OHLCVDetails.UNIX_TIME] is not None:
-                        ohlcvDetail = OHLCVDetails(
-                            tokenAddress=tokenAddress,
-                            pairAddress=pairAddress,
-                            timeframe=timeframe,
-                            unixTime=record[TradingHandlerConstants.OHLCVDetails.UNIX_TIME],
-                            timeBucket=CommonUtil.calculateInitialStartTime(record[TradingHandlerConstants.OHLCVDetails.UNIX_TIME], timeframe),
-                            openPrice=record[TradingHandlerConstants.OHLCVDetails.OPEN_PRICE],
-                            highPrice=record[TradingHandlerConstants.OHLCVDetails.HIGH_PRICE],
-                            lowPrice=record[TradingHandlerConstants.OHLCVDetails.LOW_PRICE],
-                            closePrice=record[TradingHandlerConstants.OHLCVDetails.CLOSE_PRICE],
-                            volume=record[TradingHandlerConstants.OHLCVDetails.VOLUME],
-                            trades=record.get(TradingHandlerConstants.OHLCVDetails.TRADES, 0),
-                            isComplete=True,
-                            dataSource=record.get(TradingHandlerConstants.OHLCVDetails.DATA_SOURCE, 'moralis')
-                        )
-                        timeframeRecord.addOHLCVDetail(ohlcvDetail)
+                        candleUnixTime = record[TradingHandlerConstants.OHLCVDetails.UNIX_TIME]
+                        
+                        # Initialize seenCandles structure if needed
+                        if tokenAddress not in seenCandles:
+                            seenCandles[tokenAddress] = {}
+                        if timeframe not in seenCandles[tokenAddress]:
+                            seenCandles[tokenAddress][timeframe] = set()
+                        
+                        # O(1) check if candle already exists using set
+                        if candleUnixTime not in seenCandles[tokenAddress][timeframe]:
+                            # Mark as seen
+                            seenCandles[tokenAddress][timeframe].add(candleUnixTime)
+                            
+                            ohlcvDetail = OHLCVDetails(
+                                tokenAddress=tokenAddress,
+                                pairAddress=pairAddress,
+                                timeframe=timeframe,
+                                unixTime=candleUnixTime,
+                                timeBucket=CommonUtil.calculateInitialStartTime(candleUnixTime, timeframe),
+                                openPrice=record[TradingHandlerConstants.OHLCVDetails.OPEN_PRICE],
+                                highPrice=record[TradingHandlerConstants.OHLCVDetails.HIGH_PRICE],
+                                lowPrice=record[TradingHandlerConstants.OHLCVDetails.LOW_PRICE],
+                                closePrice=record[TradingHandlerConstants.OHLCVDetails.CLOSE_PRICE],
+                                volume=record[TradingHandlerConstants.OHLCVDetails.VOLUME],
+                                trades=record.get(TradingHandlerConstants.OHLCVDetails.TRADES, 0),
+                                isComplete=True,
+                                dataSource=record.get(TradingHandlerConstants.OHLCVDetails.DATA_SOURCE, 'moralis')
+                            )
+                            timeframeRecord.addOHLCVDetail(ohlcvDetail)
                 
                 trackedTokens = list(trackedTokensMap.values())
                 return trackedTokens
@@ -554,8 +576,12 @@ class TradingHandler(BaseDBHandler):
                 
                 # Organize results into POJOs
                 trackedTokens = {}
+                # Track seen candle timestamps per timeframe to prevent duplicates (space and time efficient)
+                seenCandles = {}  # {tokenAddress: {timeframe: set(unixTimes)}}
+
+                records = cursor.fetchall()
                 
-                for row in cursor.fetchall():
+                for row in records:
                     tokenAddress = row[TradingHandlerConstants.EMAStates.TOKEN_ADDRESS]
                     pairAddress = row[TradingHandlerConstants.EMAStates.PAIR_ADDRESS]
                     timeframe = row[TradingHandlerConstants.EMAStates.TIMEFRAME]
@@ -603,30 +629,45 @@ class TradingHandler(BaseDBHandler):
                     )
                     
                     # Set EMAState in TimeframeRecord
-                    if emaPeriod == 21:
+                    if emaPeriod == 12:
+                        timeframeRecord.ema12State = emaState
+                    elif emaPeriod == 21:
                         timeframeRecord.ema21State = emaState
                     elif emaPeriod == 34:
                         timeframeRecord.ema34State = emaState
                     
                     # Add candle data if exists (only close price needed for EMA)
                     if row[IndicatorConstants.EMAStates.CANDLE_UNIX_TIME]:
-                        # Create OHLCVDetails with only close price (EMA only needs close price)
-                        candle = OHLCVDetails(
-                            tokenAddress=tokenAddress,
-                            pairAddress=pairAddress,
-                            timeframe=timeframe,
-                            unixTime=row[IndicatorConstants.EMAStates.CANDLE_UNIX_TIME],
-                            timeBucket=self._calculateTimeBucket(row[IndicatorConstants.EMAStates.CANDLE_UNIX_TIME], timeframe),
-                            openPrice=0.0,  # Not needed for EMA
-                            highPrice=0.0,  # Not needed for EMA
-                            lowPrice=0.0,   # Not needed for EMA
-                            closePrice=float(row[IndicatorConstants.EMAStates.CANDLE_CLOSE_PRICE]),
-                            volume=0.0,     # Not needed for EMA
-                            trades=0,       # Not needed for EMA
-                            isComplete=True,
-                            dataSource='database'
-                        )
-                        timeframeRecord.addOHLCVDetail(candle)
+                        candleUnixTime = row[IndicatorConstants.EMAStates.CANDLE_UNIX_TIME]
+                        
+                        # Initialize seenCandles structure if needed
+                        if tokenAddress not in seenCandles:
+                            seenCandles[tokenAddress] = {}
+                        if timeframe not in seenCandles[tokenAddress]:
+                            seenCandles[tokenAddress][timeframe] = set()
+                        
+                        # O(1) check if candle already exists using set
+                        if candleUnixTime not in seenCandles[tokenAddress][timeframe]:
+                            # Mark as seen
+                            seenCandles[tokenAddress][timeframe].add(candleUnixTime)
+                            
+                            # Create OHLCVDetails with only close price (EMA only needs close price)
+                            candle = OHLCVDetails(
+                                tokenAddress=tokenAddress,
+                                pairAddress=pairAddress,
+                                timeframe=timeframe,
+                                unixTime=candleUnixTime,
+                                timeBucket=self._calculateTimeBucket(candleUnixTime, timeframe),
+                                openPrice=0.0,  # Not needed for EMA
+                                highPrice=0.0,  # Not needed for EMA
+                                lowPrice=0.0,   # Not needed for EMA
+                                closePrice=float(row[IndicatorConstants.EMAStates.CANDLE_CLOSE_PRICE]),
+                                volume=0.0,     # Not needed for EMA
+                                trades=0,       # Not needed for EMA
+                                isComplete=True,
+                                dataSource='database'
+                            )
+                            timeframeRecord.addOHLCVDetail(candle)
                 
                 return list(trackedTokens.values())
                 
@@ -844,10 +885,13 @@ class TradingHandler(BaseDBHandler):
                             candle.trades,
                             candle.vwapValue,
                             candle.avwapValue,
+                            candle.ema12Value,
                             candle.ema21Value,
                             candle.ema34Value,
                             candle.trend,
                             candle.status,
+                            candle.trend12,
+                            candle.status12,
                             candle.isComplete,
                             candle.dataSource
                         ))
@@ -869,6 +913,20 @@ class TradingHandler(BaseDBHandler):
                         ))
                     
                     # Collect EMA state data
+                    if timeframeRecord.ema12State:
+                        emaStateData.append((
+                            timeframeRecord.ema12State.tokenAddress,
+                            timeframeRecord.ema12State.pairAddress,
+                            timeframeRecord.ema12State.timeframe,
+                            timeframeRecord.ema12State.emaKey,
+                            timeframeRecord.ema12State.emaValue,
+                            timeframeRecord.ema12State.lastUpdatedUnix,
+                            timeframeRecord.ema12State.nextFetchTime,
+                            timeframeRecord.ema12State.emaAvailableTime,
+                            timeframeRecord.ema12State.pairCreatedTime,
+                            timeframeRecord.ema12State.status
+                        ))
+
                     if timeframeRecord.ema21State:
                         emaStateData.append((
                             timeframeRecord.ema21State.tokenAddress,
@@ -976,10 +1034,13 @@ class TradingHandler(BaseDBHandler):
                                 candle.trades,
                                 candle.vwapValue,
                                 candle.avwapValue,
+                                candle.ema12Value,
                                 candle.ema21Value,
                                 candle.ema34Value,
                                 candle.trend,
                                 candle.status,
+                                candle.trend12,
+                                candle.status12,
                                 candle.isComplete,
                                 candle.dataSource
                             ))
@@ -1000,6 +1061,20 @@ class TradingHandler(BaseDBHandler):
                                 timeframeRecord.vwapSession.nextCandleFetch
                             ))
                         
+                        if timeframeRecord.ema12State:
+                            emaStateData.append((
+                                timeframeRecord.ema12State.tokenAddress,
+                                timeframeRecord.ema12State.pairAddress,
+                                timeframeRecord.ema12State.timeframe,
+                                timeframeRecord.ema12State.emaKey,
+                                timeframeRecord.ema12State.emaValue,
+                                timeframeRecord.ema12State.lastUpdatedUnix,
+                                timeframeRecord.ema12State.nextFetchTime,
+                                timeframeRecord.ema12State.emaAvailableTime,
+                                timeframeRecord.ema12State.pairCreatedTime,
+                                timeframeRecord.ema12State.status
+                            ))
+
                         # Collect EMA state data
                         if timeframeRecord.ema21State:
                             emaStateData.append((
@@ -1065,26 +1140,43 @@ class TradingHandler(BaseDBHandler):
             return 0
 
     def batchPersistEMAData(self, trackedTokens: List['TrackedToken']) -> int:
-        """
-        OPTIMIZED: Batch persist only EMA data (EMA states + candle EMA values)
-        
-        Args:
-            trackedTokens: List of TrackedToken POJOs with EMA data
-            
-        Returns:
-            int: Number of EMA states updated
-        """
         try:
             totalEMAStatesUpdated = 0
             
             with self.conn_manager.transaction() as cursor:
-                # Collect EMA-specific data for batch operations
                 emaStateData = []
+                ema12CandleUpdates = []
                 ema21CandleUpdates = []
                 ema34CandleUpdates = []
                 
                 for trackedToken in trackedTokens:
                     for timeframeRecord in trackedToken.timeframeRecords:
+                        # Collect EMA12 state data
+                        if timeframeRecord.ema12State:
+                            emaStateData.append((
+                                timeframeRecord.ema12State.tokenAddress,
+                                timeframeRecord.ema12State.pairAddress,
+                                timeframeRecord.ema12State.timeframe,
+                                timeframeRecord.ema12State.emaKey,
+                                timeframeRecord.ema12State.emaValue,
+                                timeframeRecord.ema12State.lastUpdatedUnix,
+                                timeframeRecord.ema12State.nextFetchTime,
+                                timeframeRecord.ema12State.emaAvailableTime,
+                                timeframeRecord.ema12State.pairCreatedTime,
+                                timeframeRecord.ema12State.status
+                            ))
+                            totalEMAStatesUpdated += 1
+                            
+                            # Collect EMA12 candle updates
+                            for candle in timeframeRecord.ohlcvDetails:
+                                if candle.ema12Value is not None:
+                                    ema12CandleUpdates.append((
+                                        candle.ema12Value,
+                                        candle.tokenAddress,
+                                        candle.timeframe,
+                                        candle.unixTime
+                                    ))
+                        
                         # Collect EMA21 state data
                         if timeframeRecord.ema21State:
                             emaStateData.append((
@@ -1140,6 +1232,15 @@ class TradingHandler(BaseDBHandler):
                 # Execute EMA-specific batch operations
                 if emaStateData:
                     self._batchInsertEMAStates(cursor, emaStateData)
+                
+                # Update EMA12 values
+                if ema12CandleUpdates:
+                    cursor.executemany("""
+                        UPDATE ohlcvdetails 
+                        SET ema12value = %s
+                        WHERE tokenaddress = %s AND timeframe = %s AND unixtime = %s
+                    """, ema12CandleUpdates)
+                    logger.info(f"Batch updated {len(ema12CandleUpdates)} EMA12 candle values")
                 
                 # Update EMA21 values
                 if ema21CandleUpdates:
@@ -1311,6 +1412,8 @@ class TradingHandler(BaseDBHandler):
                 
                 # Organize results into POJOs
                 trackedTokens = {}
+                # Track seen candle timestamps per timeframe to prevent duplicates (space and time efficient)
+                seenCandles = {}  # {tokenAddress: {timeframe: set(unixTimes)}}
                 
                 for row in cursor.fetchall():
                     tokenAddress = row['tokenaddress']
@@ -1360,23 +1463,36 @@ class TradingHandler(BaseDBHandler):
                     
                     # Add candle data if exists
                     if row['candle_unixtime']:
-                        # Create OHLCVDetails with all candle data (AVWAP needs full OHLCV data)
-                        candle = OHLCVDetails(
-                            tokenAddress=tokenAddress,
-                            pairAddress=pairAddress,
-                            timeframe=timeframe,
-                            unixTime=row['candle_unixtime'],
-                            timeBucket=row['candle_timebucket'],
-                            openPrice=float(row['candle_openprice']),
-                            highPrice=float(row['candle_highprice']),
-                            lowPrice=float(row['candle_lowprice']),
-                            closePrice=float(row['candle_closeprice']),
-                            volume=float(row['candle_volume']),
-                            trades=row['candle_trades'],
-                            isComplete=row['candle_iscomplete'],
-                            dataSource=row['candle_datasource']
-                        )
-                        timeframeRecord.addOHLCVDetail(candle)
+                        candleUnixTime = row['candle_unixtime']
+                        
+                        # Initialize seenCandles structure if needed
+                        if tokenAddress not in seenCandles:
+                            seenCandles[tokenAddress] = {}
+                        if timeframe not in seenCandles[tokenAddress]:
+                            seenCandles[tokenAddress][timeframe] = set()
+                        
+                        # O(1) check if candle already exists using set
+                        if candleUnixTime not in seenCandles[tokenAddress][timeframe]:
+                            # Mark as seen
+                            seenCandles[tokenAddress][timeframe].add(candleUnixTime)
+                            
+                            # Create OHLCVDetails with all candle data (AVWAP needs full OHLCV data)
+                            candle = OHLCVDetails(
+                                tokenAddress=tokenAddress,
+                                pairAddress=pairAddress,
+                                timeframe=timeframe,
+                                unixTime=candleUnixTime,
+                                timeBucket=row['candle_timebucket'],
+                                openPrice=float(row['candle_openprice']),
+                                highPrice=float(row['candle_highprice']),
+                                lowPrice=float(row['candle_lowprice']),
+                                closePrice=float(row['candle_closeprice']),
+                                volume=float(row['candle_volume']),
+                                trades=row['candle_trades'],
+                                isComplete=row['candle_iscomplete'],
+                                dataSource=row['candle_datasource']
+                            )
+                            timeframeRecord.addOHLCVDetail(candle)
                 
                 return list(trackedTokens.values())
                 
@@ -1466,17 +1582,20 @@ class TradingHandler(BaseDBHandler):
             INSERT INTO ohlcvdetails 
             (timeframeid, tokenaddress, pairaddress, timeframe, unixtime, timebucket, 
              openprice, highprice, lowprice, closeprice, volume, trades,
-             vwapvalue, avwapvalue, ema21value, ema34value, trend, status, iscomplete, datasource,
+             vwapvalue, avwapvalue, ema12value, ema21value, ema34value, trend, status, trend12, status12, iscomplete, datasource,
              createdat, lastupdatedat)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, NOW(), NOW())
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, NOW(), NOW())
             ON CONFLICT (tokenaddress, timeframe, unixtime) 
             DO UPDATE SET 
                 vwapvalue = EXCLUDED.vwapvalue,
                 avwapvalue = EXCLUDED.avwapvalue,
+                ema12value = EXCLUDED.ema12value,
                 ema21value = EXCLUDED.ema21value,
                 ema34value = EXCLUDED.ema34value,
                 trend = EXCLUDED.trend,
                 status = EXCLUDED.status,
+                trend12 = EXCLUDED.trend12,
+                status12 = EXCLUDED.status12,
                 lastupdatedat = NOW()
         """, candleData)
 
@@ -1603,12 +1722,15 @@ class TradingHandler(BaseDBHandler):
                                 alert.pairAddress,
                                 alert.timeframe,
                                 alert.vwap,
+                                alert.ema12,
                                 alert.ema21,
                                 alert.ema34,
                                 alert.avwap,
                                 alert.lastUpdatedUnix,
                                 alert.trend,
                                 alert.status,
+                                alert.trend12,
+                                alert.status12,
                                 alert.touchCount,
                                 alert.latestTouchUnix
                             ))
@@ -1616,10 +1738,13 @@ class TradingHandler(BaseDBHandler):
                             
                             # Collect candle trend/status updates
                             for candle in timeframeRecord.ohlcvDetails:
-                                if candle.trend is not None or candle.status is not None:
+                                if (candle.trend is not None or candle.status is not None or 
+                                    candle.trend12 is not None or candle.status12 is not None):
                                     candleTrendStatusUpdates.append((
                                         candle.trend,
                                         candle.status,
+                                        candle.trend12,
+                                        candle.status12,
                                         candle.tokenAddress,
                                         candle.timeframe,
                                         candle.unixTime
@@ -1629,19 +1754,22 @@ class TradingHandler(BaseDBHandler):
                 if alertData:
                     cursor.executemany("""
                         INSERT INTO alerts 
-                        (tokenid, tokenaddress, pairaddress, timeframe, vwap, ema21, ema34, avwap,
-                         lastupdatedunix, trend, status, touchcount, latesttouchunix,
+                        (tokenid, tokenaddress, pairaddress, timeframe, vwap, ema12, ema21, ema34, avwap,
+                         lastupdatedunix, trend, status, trend12, status12, touchcount, latesttouchunix,
                          createdat, lastupdatedat)
-                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, NOW(), NOW())
+                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, NOW(), NOW())
                         ON CONFLICT (tokenaddress, timeframe) 
                         DO UPDATE SET 
                             vwap = EXCLUDED.vwap,
+                            ema12 = EXCLUDED.ema12,
                             ema21 = EXCLUDED.ema21,
                             ema34 = EXCLUDED.ema34,
                             avwap = EXCLUDED.avwap,
                             lastupdatedunix = EXCLUDED.lastupdatedunix,
                             trend = EXCLUDED.trend,
                             status = EXCLUDED.status,
+                            trend12 = EXCLUDED.trend12,
+                            status12 = EXCLUDED.status12,
                             touchcount = EXCLUDED.touchcount,
                             latesttouchunix = EXCLUDED.latesttouchunix,
                             lastupdatedat = NOW()
@@ -1651,7 +1779,7 @@ class TradingHandler(BaseDBHandler):
                 if candleTrendStatusUpdates:
                     cursor.executemany("""
                         UPDATE ohlcvdetails 
-                        SET trend = %s, status = %s
+                        SET trend = %s, status = %s, trend12 = %s, status12 = %s
                         WHERE tokenaddress = %s AND timeframe = %s AND unixtime = %s
                     """, candleTrendStatusUpdates)
                     logger.info(f"Updated trend/status for {len(candleTrendStatusUpdates)} candles")
@@ -1683,12 +1811,15 @@ class TradingHandler(BaseDBHandler):
                             a.pairaddress,
                             a.timeframe,
                             a.vwap as alert_vwap,
+                            a.ema12 as alert_ema12,
                             a.ema21 as alert_ema21,
                             a.ema34 as alert_ema34,
                             a.avwap as alert_avwap,
                             a.lastupdatedunix,
                             a.trend as alert_trend,
                             a.status as alert_status,
+                            a.trend12 as alert_trend12,
+                            a.status12 as alert_status12,
                             a.touchcount,
                             a.latesttouchunix,
                             tt.trackedtokenid,
@@ -1696,12 +1827,15 @@ class TradingHandler(BaseDBHandler):
                             tt.name,
                             tm.id as timeframeid,
                             tm.lastfetchedat,
+                            es12.emaavailabletime as ema12availabletime,
                             es21.emaavailabletime as ema21availabletime,
                             es34.emaavailabletime as ema34availabletime
                         FROM alerts a
                         INNER JOIN trackedtokens tt ON a.tokenid = tt.trackedtokenid
                         INNER JOIN timeframemetadata tm ON a.tokenaddress = tm.tokenaddress 
                             AND a.timeframe = tm.timeframe
+                        LEFT JOIN emastates es12 ON a.tokenaddress = es12.tokenaddress 
+                            AND a.timeframe = es12.timeframe AND es12.emakey = '12'
                         LEFT JOIN emastates es21 ON a.tokenaddress = es21.tokenaddress 
                             AND a.timeframe = es21.timeframe AND es21.emakey = '21'
                         LEFT JOIN emastates es34 ON a.tokenaddress = es34.tokenaddress 
@@ -1720,16 +1854,20 @@ class TradingHandler(BaseDBHandler):
                         o.trades,
                         o.vwapvalue,
                         o.avwapvalue,
+                        o.ema12value,
                         o.ema21value,
                         o.ema34value,
                         o.trend as candle_trend,
-                        o.status as candle_status
+                        o.status as candle_status,
+                        o.trend12 as candle_trend12,
+                        o.status12 as candle_status12
                     FROM alert_data ad
                     LEFT JOIN ohlcvdetails o ON ad.tokenaddress = o.tokenaddress 
                         AND ad.timeframe = o.timeframe
                         AND o.unixtime > COALESCE(ad.lastupdatedunix, 0)
                         AND o.vwapvalue IS NOT NULL
                         AND o.avwapvalue IS NOT NULL
+                        AND (ad.ema12availabletime IS NULL OR o.unixtime < ad.ema12availabletime OR o.ema12value IS NOT NULL)
                         AND (ad.ema21availabletime IS NULL OR o.unixtime < ad.ema21availabletime OR o.ema21value IS NOT NULL)
                         AND (ad.ema34availabletime IS NULL OR o.unixtime < ad.ema34availabletime OR o.ema34value IS NOT NULL)
                     ORDER BY ad.tokenaddress, ad.timeframe, o.unixtime
@@ -1740,6 +1878,8 @@ class TradingHandler(BaseDBHandler):
                 
                 # Organize into POJOs
                 trackedTokens = {}
+                # Track seen candle timestamps per timeframe to prevent duplicates (space and time efficient)
+                seenCandles = {}  # {tokenAddress: {timeframe: set(unixTimes)}}
                 
                 for row in records:
                     tokenAddress = row['tokenaddress']
@@ -1776,16 +1916,27 @@ class TradingHandler(BaseDBHandler):
                             pairAddress=row['pairaddress'],
                             timeframe=timeframe,
                             vwap=row['alert_vwap'],
+                            ema12=row['alert_ema12'],
                             ema21=row['alert_ema21'],
                             ema34=row['alert_ema34'],
                             avwap=row['alert_avwap'],
                             lastUpdatedUnix=row['lastupdatedunix'],
                             trend=row['alert_trend'],
                             status=row['alert_status'],
+                            trend12=row['alert_trend12'],
+                            status12=row['alert_status12'],
                             touchCount=row['touchcount'],
                             latestTouchUnix=row['latesttouchunix']
                         )
                         
+                        if row['ema12availabletime']:
+                            timeframeRecord.ema12State = EMAState(
+                                tokenAddress=tokenAddress,
+                                pairAddress=row['pairaddress'],
+                                timeframe=timeframe,
+                                emaKey='12',
+                                emaAvailableTime=row['ema12availabletime']
+                            )
                         if row['ema21availabletime']:
                             timeframeRecord.ema21State = EMAState(
                                 tokenAddress=tokenAddress,
@@ -1807,28 +1958,44 @@ class TradingHandler(BaseDBHandler):
                     
                     # Add candle data if exists
                     if row['unixtime']:
-                        candle = OHLCVDetails(
-                            tokenAddress=tokenAddress,
-                            pairAddress=row['pairaddress'],
-                            timeframe=timeframe,
-                            unixTime=row['unixtime'],
-                            timeBucket=row['timebucket'],
-                            openPrice=float(row['openprice']),
-                            highPrice=float(row['highprice']),
-                            lowPrice=float(row['lowprice']),
-                            closePrice=float(row['closeprice']),
-                            volume=float(row['volume']),
-                            trades=row['trades'],
-                            vwapValue=float(row['vwapvalue']) if row['vwapvalue'] else None,
-                            avwapValue=float(row['avwapvalue']) if row['avwapvalue'] else None,
-                            ema21Value=float(row['ema21value']) if row['ema21value'] else None,
-                            ema34Value=float(row['ema34value']) if row['ema34value'] else None,
-                            trend=row['candle_trend'],
-                            status=row['candle_status'],
-                            isComplete=True,
-                            dataSource='database'
-                        )
-                        timeframeRecord.addOHLCVDetail(candle)
+                        candleUnixTime = row['unixtime']
+                        
+                        # Initialize seenCandles structure if needed
+                        if tokenAddress not in seenCandles:
+                            seenCandles[tokenAddress] = {}
+                        if timeframe not in seenCandles[tokenAddress]:
+                            seenCandles[tokenAddress][timeframe] = set()
+                        
+                        # O(1) check if candle already exists using set
+                        if candleUnixTime not in seenCandles[tokenAddress][timeframe]:
+                            # Mark as seen
+                            seenCandles[tokenAddress][timeframe].add(candleUnixTime)
+                            
+                            candle = OHLCVDetails(
+                                tokenAddress=tokenAddress,
+                                pairAddress=row['pairaddress'],
+                                timeframe=timeframe,
+                                unixTime=candleUnixTime,
+                                timeBucket=row['timebucket'],
+                                openPrice=float(row['openprice']),
+                                highPrice=float(row['highprice']),
+                                lowPrice=float(row['lowprice']),
+                                closePrice=float(row['closeprice']),
+                                volume=float(row['volume']),
+                                trades=row['trades'],
+                                vwapValue=float(row['vwapvalue']) if row['vwapvalue'] else None,
+                                avwapValue=float(row['avwapvalue']) if row['avwapvalue'] else None,
+                                ema12Value=float(row['ema12value']) if row['ema12value'] else None,
+                                ema21Value=float(row['ema21value']) if row['ema21value'] else None,
+                                ema34Value=float(row['ema34value']) if row['ema34value'] else None,
+                                trend=row['candle_trend'],
+                                status=row['candle_status'],
+                                trend12=row['candle_trend12'],
+                                status12=row['candle_status12'],
+                                isComplete=True,
+                                dataSource='database'
+                            )
+                            timeframeRecord.addOHLCVDetail(candle)
                 
                 return list(trackedTokens.values())
                 

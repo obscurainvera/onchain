@@ -45,6 +45,15 @@ class BandInfo:
             return '2'
         elif bandType == 'EMA34':
             return '3'
+        elif bandType == 'EMA12':
+            return '1'
+        elif bandType.startswith('EMA'):
+            # Extract number from EMA label (e.g., EMA5 -> 5, EMA20 -> 20)
+            try:
+                ema_number = bandType[3:]  # Remove 'EMA' prefix
+                return ema_number
+            except:
+                return bandType[0]  # Fallback to first character
         else:
             return bandType[0]  # First character for AVWAP, VWAP, etc.
 

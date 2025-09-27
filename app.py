@@ -19,27 +19,24 @@ from flask_cors import CORS
 
 from database.trading.TradingHandler import TradingHandler
 
-# Load environment variables
+
 load_dotenv()
 
-# Parse command-line arguments
+
 parser = argparse.ArgumentParser(description='Run the portfolio monitoring application')
 parser.add_argument('--port', type=int, help='Port to run the application on')
 args = parser.parse_args()
-
-# Local module imports
 from config.Config import get_config
 from logs.logger import get_logger
 from scheduler.JobRunner import JobRunner
 from database.operations.PortfolioDB import PortfolioDB
 from database.operations.DatabaseConnectionManager import DatabaseConnectionManager
-
-# Handler imports
 from database.auth.CredentialsHandler import CredentialsHandler
 from database.auth.TokenHandler import TokenHandler
 from database.job.job_handler import JobHandler
 from database.notification.NotificationHandler import NotificationHandler
 from api.trading.TradingAPI import trading_bp
+from api.trading.DexScreenerAPI import dexscreener_bp
 
 logger = get_logger(__name__)
 
@@ -151,7 +148,8 @@ class PortfolioApp:
     def _register_blueprints(self):
         """Register all API blueprints for modular route management."""
         blueprints = [
-            trading_bp
+            trading_bp,
+            dexscreener_bp
         ]
         for bp in blueprints:
             self.app.register_blueprint(bp)

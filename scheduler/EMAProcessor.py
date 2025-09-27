@@ -84,24 +84,18 @@ class EMAProcessor:
     
     def __init__(self, trading_handler: TradingHandler):
         self.trading_handler = trading_handler
-        self.EMA_PERIODS = [21, 34]
+        self.EMA_PERIODS = [12, 21, 34]
 
     def calculateEMAForAllRetrievedTokens(self, trackedTokens: List['TrackedToken']) -> None:
-        """
-        Process all EMA calculations using POJOs and update them directly
-        
-        Args:
-            trackedTokens: List of TrackedToken POJOs with EMA data and candles
-        """
         try:
             totalProcessed = 0
             
             for trackedToken in trackedTokens:
                 for timeframeRecord in trackedToken.timeframeRecords:
-                    # Process both EMA21 and EMA34
+                    # Process EMA12, EMA21 and EMA34
                     for emaPeriod in self.EMA_PERIODS:
                         # Get the appropriate EMA state
-                        emaState = timeframeRecord.ema21State if emaPeriod == 21 else timeframeRecord.ema34State
+                        emaState = timeframeRecord.ema12State if emaPeriod == 12 else timeframeRecord.ema21State if emaPeriod == 21 else timeframeRecord.ema34State
                         
                         if not emaState:
                             continue
@@ -114,7 +108,6 @@ class EMAProcessor:
                         )
                         
                         if emaCalculationType == EMACalculationType.NOT_AVAILABLE_INSUFFICIENT:
-                            # Not enough candles yet, skip
                             continue
                         
                         # Calculate EMA based on action type
@@ -209,13 +202,15 @@ class EMAProcessor:
                 latestUNIX = candle.unixTime
                 
                 # Update the candle POJO directly with EMA value
-                if emaPeriod == 21:
+                if emaPeriod == 12:
+                    candle.ema12Value = currentEMAValue
+                elif emaPeriod == 21:
                     candle.ema21Value = currentEMAValue
                 elif emaPeriod == 34:
                     candle.ema34Value = currentEMAValue
             
             # Update the EMAState POJO directly
-            emaState = timeframeRecord.ema21State if emaPeriod == 21 else timeframeRecord.ema34State
+            emaState = timeframeRecord.ema12State if emaPeriod == 12 else timeframeRecord.ema21State if emaPeriod == 21 else timeframeRecord.ema34State
             if emaState:
                 emaState.emaValue = currentEMAValue
                 emaState.lastUpdatedUnix = latestUNIX
@@ -253,6 +248,7 @@ class EMAProcessor:
         SHARED METHOD: Calculate EMA from OHLCVDetails POJOs and update TimeframeRecord directly
 
         CORRECT EMA LOGIC:
+        - For EMA12: Calculate SMA using first 12 candles for the 12th candle
         - For EMA21: Calculate SMA using first 21 candles for the 21st candle
         - For EMA34: Calculate SMA using first 34 candles for the 34th candle
         - Then calculate EMA for all subsequent candles using standard EMA formula
@@ -260,7 +256,7 @@ class EMAProcessor:
 
         Args:
             timeframeRecord: TimeframeRecord POJO (will be updated in place)
-            ema_period: EMA period (21 or 34)
+            ema_period: EMA period (12 or 21 or 34)
             token_address: Token address
             pair_address: Pair address
             timeframe: Timeframe
@@ -298,7 +294,9 @@ class EMAProcessor:
                 latestUNIX = candle.unixTime
 
                 # Update the candle POJO directly with EMA value
-                if emaPeriod == 21:
+                if emaPeriod == 12:
+                    candle.ema12Value = currentEMA
+                elif emaPeriod == 21:
                     candle.ema21Value = currentEMA
                 elif emaPeriod == 34:
                     candle.ema34Value = currentEMA
@@ -322,7 +320,9 @@ class EMAProcessor:
             )
 
             # Set the EMAState directly in timeframeRecord
-            if emaPeriod == 21:
+            if emaPeriod == 12:
+                timeframeRecord.ema12State = emaState
+            elif emaPeriod == 21:
                 timeframeRecord.ema21State = emaState
             elif emaPeriod == 34:
                 timeframeRecord.ema34State = emaState
@@ -347,8 +347,8 @@ class EMAProcessor:
             latestFetchedAtTime = max(candle.unixTime for candle in timeframeRecord.ohlcvDetails)
             timeframeInSeconds = CommonUtil.getTimeframeSeconds(timeframeRecord.timeframe)
             
-            # Process both EMA21 and EMA34
-            for emaPeriod in [21, 34]:
+            # Process EMA12, EMA21 and EMA34
+            for emaPeriod in [12, 21, 34]:
                 # Calculate EMA available time (same logic as calcualteEMAForNewTokenFromAPI)
                 initialCandleStartTime = self.calculateInitialCandleStartTime(pairCreatedTime, timeframeRecord.timeframe)
                 emaAvailableTime = initialCandleStartTime + (emaPeriod * timeframeInSeconds)
@@ -385,7 +385,9 @@ class EMAProcessor:
                     )
                     
                     # Set the EMA state in the timeframe record
-                    if emaPeriod == 21:
+                    if emaPeriod == 12:
+                        timeframeRecord.ema12State = emaState
+                    elif emaPeriod == 21:
                         timeframeRecord.ema21State = emaState
                     elif emaPeriod == 34:
                         timeframeRecord.ema34State = emaState
