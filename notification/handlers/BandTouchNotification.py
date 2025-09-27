@@ -66,7 +66,7 @@ class BandTouchNotification:
             commonMessage = BandTouch.formatMessage(bandTouchData)
 
             success = notificationService.sendNotification(
-                chatId=chatCredentials['chatId'],
+                chatCredentials=chatCredentials,
                 notificationType=NotificationType.BAND_TOUCH,
                 commonMessage=commonMessage
             )

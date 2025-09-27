@@ -12,9 +12,7 @@ from notification.utils.NotificationUtil import NotificationUtil
 from notification.NotificationManager import NotificationService
 from notification.NotificationType import NotificationType
 from notification.types.BullishCross import BullishCross
-
-if TYPE_CHECKING:
-    from api.trading.request import TrackedToken, TimeframeRecord, OHLCVDetails
+from api.trading.request import TrackedToken, TimeframeRecord, OHLCVDetails
 
 logger = get_logger(__name__)
 
@@ -25,9 +23,9 @@ class BullishCrossNotification:
     @staticmethod
     def sendAlert(chatName: str, trackedToken: 'TrackedToken', timeframeRecord: 'TimeframeRecord', candle: 'OHLCVDetails') -> bool:
         try:
-            if not NotificationUtil.validateChatName(chatName):
-                logger.error(f"Invalid chat name: {chatName}")
-                return False
+            # if not NotificationUtil.validateChatName(chatName):
+            #     logger.error(f"Invalid chat name: {chatName}")
+            #     return False
             
             chatCredentials = NotificationUtil.getChatCredentials(chatName)
             if not chatCredentials:
@@ -40,7 +38,7 @@ class BullishCrossNotification:
             
             notificationService = NotificationService()
             success = notificationService.sendNotification(
-                chatId=chatCredentials['chatId'],
+                chatCredentials=chatCredentials,
                 notificationType=NotificationType.BULLISH_CROSS,
                 commonMessage=commonMessage
             )
@@ -73,3 +71,40 @@ class BullishCrossNotification:
             return BullishCrossUrls.DEXSCREENER_BASE.format(tokenAddress=tokenAddress)
         except Exception:
             return None
+
+    @staticmethod
+    def testingNotis():
+        try:
+            trackedToken = TrackedToken(
+                trackedTokenId=1,
+                symbol="SOL",
+                tokenAddress="0x0000000000000000000000000000000000000000",
+                name="SOL",
+                pairAddress="0x0000000000000000000000000000000000000000"
+            
+            )
+            timeframeRecord = TimeframeRecord(
+                timeframeId=1,
+                tokenAddress="0x0000000000000000000000000000000000000000",
+                pairAddress="0x0000000000000000000000000000000000000000",
+                timeframe="1h",
+                nextFetchAt=1717171717,
+                lastFetchedAt=1717171717,
+                isActive=True
+            )
+            candle = OHLCVDetails(
+                timeframeId=1,
+                tokenAddress="0x0000000000000000000000000000000000000000",
+                pairAddress="0x0000000000000000000000000000000000000000",
+                timeframe="1h",
+                unixTime=1717171717,
+                timeBucket=1717171717,
+                openPrice=100.0,
+                highPrice=100.0,
+                lowPrice=100.0,
+                closePrice=100.0,
+                volume=100.0
+            )   
+            BullishCrossNotification.sendAlert("ONCHAIN_SUSTAINING_CHAT", trackedToken, timeframeRecord, candle)
+        except Exception as e:
+            logger.error(f"Error in testingNotis: {e}")

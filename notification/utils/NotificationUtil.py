@@ -49,7 +49,8 @@ class NotificationUtil:
             
             return {
                 'chatId': chatIdCredentials[CredentialField.API_KEY],  # CHAT_ID is stored in apikey field
-                'apiKey': apiKeyCredentials[CredentialField.API_KEY]   # API_KEY (bot token)
+                'apiKey': apiKeyCredentials[CredentialField.API_KEY],   # API_KEY (bot token)
+                'chatName': chatName
             }
             
         except Exception as e:

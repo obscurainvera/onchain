@@ -34,35 +34,28 @@ class NotificationService:
         self.credentialsHandler = CredentialsHandler(dbManager)
         self.session = requests.Session()
     
-    def sendNotification(self, chatId: str, notificationType: NotificationType, 
-                        commonMessage: CommonMessage, chatName: str) -> bool:
+    def sendNotification(self, chatCredentials: dict, notificationType: NotificationType, 
+                        commonMessage: CommonMessage) -> bool:
         
         try:
             # Step 1: Save to database as pending
-            notificationId = self._saveNotificationRecord(
-                chatName, notificationType, commonMessage
+            notificationId = self.recordNotification(
+                chatCredentials.get('chatName'), notificationType, commonMessage
             )
             
             if not notificationId:
                 logger.error("Failed to save notification to database")
                 return False
             
-            # Step 2: Get bot token for the chat
-            botToken = self._getBotToken(chatName)
-            if not botToken:
-                logger.error(f"No bot token found for chat {chatId}")
-                self._updateNotificationStatus(notificationId, "failed", "No bot token found")
-                return False
-            
             # Step 3: Send via Telegram
-            success = self._sendToTelegram(botToken, chatId, commonMessage)
+            success = self.sendTGMessage(chatCredentials, commonMessage)
             
             # Step 4: Update status
             if success:
-                self._updateNotificationStatus(notificationId, "sent")
+                self.updateNotificationStatus(notificationId, "sent")
                 logger.info(f"Successfully sent notification {notificationId}")
             else:
-                self._updateNotificationStatus(notificationId, "failed", "Failed to send to Telegram")
+                self.updateNotificationStatus(notificationId, "failed", "Failed to send to Telegram")
                 logger.error(f"Failed to send notification {notificationId}")
             
             return success
@@ -71,7 +64,7 @@ class NotificationService:
             logger.error(f"Error in sendNotification: {e}")
             return False
     
-    def _saveNotificationRecord(self, chatName: str, notificationType: NotificationType, 
+    def recordNotification(self, chatName: str, notificationType: NotificationType, 
                                commonMessage: CommonMessage) -> Optional[int]:
         """Save notification record to database using NotificationHandler"""
         try:
@@ -95,26 +88,13 @@ class NotificationService:
             logger.error(f"Error saving notification record: {e}")
             return None
     
-    def _getBotToken(self, chatName: str) -> Optional[str]:
-        """Get bot token for the chat"""
-        try:
-            # Try to get bot token using chat ID as service name
-            credential = self.credentialsHandler.getCredentialsByType(
-                serviceName=chatName,
-                credentialType=CredentialType.API_KEY.value
-            )
-            
-            if credential:
-                return credential.get('apikey')
-            return None
-        except Exception as e:
-            logger.error(f"Error getting bot token: {e}")
-            return None
     
-    def _sendToTelegram(self, botToken: str, chatId: str, 
+    def sendTGMessage(self, chatCredentials: dict, 
                        commonMessage: CommonMessage) -> bool:
         """Send message to Telegram"""
         try:
+            botToken = chatCredentials.get('apiKey')
+            chatId = chatCredentials.get('chatId')
             url = f"https://api.telegram.org/bot{botToken}/sendMessage"
             
             payload = {
@@ -156,7 +136,7 @@ class NotificationService:
             logger.error(f"Error sending to Telegram: {e}")
             return False
     
-    def _updateNotificationStatus(self, notificationId: int, status: str, 
+    def updateNotificationStatus(self, notificationId: int, status: str, 
                                  errorDetails: Optional[str] = None) -> None:
         """Update notification status using NotificationHandler"""
         try:
