@@ -1,6 +1,7 @@
 """
 Simple notification service
 """
+from tkinter import N
 from typing import Optional
 import json
 import requests
@@ -34,12 +35,12 @@ class NotificationService:
         self.session = requests.Session()
     
     def sendNotification(self, chatId: str, notificationType: NotificationType, 
-                        commonMessage: CommonMessage) -> bool:
+                        commonMessage: CommonMessage, chatName: str) -> bool:
         
         try:
             # Step 1: Save to database as pending
             notificationId = self._saveNotificationRecord(
-                chatId, notificationType, commonMessage
+                chatName, notificationType, commonMessage
             )
             
             if not notificationId:
@@ -47,7 +48,7 @@ class NotificationService:
                 return False
             
             # Step 2: Get bot token for the chat
-            botToken = self._getBotToken(chatId)
+            botToken = self._getBotToken(chatName)
             if not botToken:
                 logger.error(f"No bot token found for chat {chatId}")
                 self._updateNotificationStatus(notificationId, "failed", "No bot token found")
@@ -70,7 +71,7 @@ class NotificationService:
             logger.error(f"Error in sendNotification: {e}")
             return False
     
-    def _saveNotificationRecord(self, chatId: str, notificationType: NotificationType, 
+    def _saveNotificationRecord(self, chatName: str, notificationType: NotificationType, 
                                commonMessage: CommonMessage) -> Optional[int]:
         """Save notification record to database using NotificationHandler"""
         try:
@@ -83,7 +84,7 @@ class NotificationService:
             # Use NotificationHandler to create the record
             return self.notificationHandler.createNotification(
                 source=notificationType.value,
-                chatGroup=chatId,
+                chatGroup=chatName,
                 content=commonMessage.formattedMessage,
                 tokenId=commonMessage.tokenId,
                 strategyType=commonMessage.strategyType,
@@ -94,26 +95,18 @@ class NotificationService:
             logger.error(f"Error saving notification record: {e}")
             return None
     
-    def _getBotToken(self, chatId: str) -> Optional[str]:
+    def _getBotToken(self, chatName: str) -> Optional[str]:
         """Get bot token for the chat"""
         try:
             # Try to get bot token using chat ID as service name
             credential = self.credentialsHandler.getCredentialsByType(
-                serviceName=chatId,
+                serviceName=chatName,
                 credentialType=CredentialType.API_KEY.value
             )
             
             if credential:
                 return credential.get('apikey')
-            
-            # Fallback: try with 'telegram' service name
-            credential = self.credentialsHandler.getCredentialsByType(
-                serviceName="telegram",
-                credentialType=CredentialType.API_KEY.value
-            )
-            
-            return credential.get('apikey') if credential else None
-            
+            return None
         except Exception as e:
             logger.error(f"Error getting bot token: {e}")
             return None

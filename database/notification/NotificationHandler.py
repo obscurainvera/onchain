@@ -100,19 +100,10 @@ class NotificationHandler(BaseDBHandler):
                         tokenId, strategyType, buttons, currentTime, currentTime
                     ))
                     result = cursor.fetchone()
-                    return result[0] if result else None
-                else:
-                    cursor.execute(text("""
-                        INSERT INTO notification (
-                            source, chatgroup, content, status, tokenid, 
-                            strategytype, buttons, createdat, updatedat
-                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-                    """), (
-                        source, chatGroup, content, "pending", 
-                        tokenId, strategyType, buttons, currentTime, currentTime
-                    ))
-                    return cursor.lastrowid
-                    
+                    if result:
+                        return result.get('id')
+                    return None
+
         except Exception as e:
             logger.error(f"Error creating notification: {e}")
             return None

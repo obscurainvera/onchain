@@ -45,7 +45,7 @@ class DatabaseConnectionManager:
             db_url: Database connection URL (deprecated, kept for compatibility)
         """
         self.config = get_config()
-        self.connection_type = "postgres"
+        self.connection_type = self.config.DB_TYPE
         self.pool = None
         self._pool_closed = False
         self.logger = logger
