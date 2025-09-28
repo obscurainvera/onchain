@@ -29,6 +29,8 @@ class Alert:
                  lastUpdatedUnix: Optional[int] = None,
                  trend: Optional[str] = None,
                  status: Optional[str] = None,
+                 trend12: Optional[str] = None,
+                 status12: Optional[str] = None,
                  touchCount: int = 0,
                  latestTouchUnix: Optional[int] = None,
                  touchCount12: int = 0,
@@ -68,6 +70,8 @@ class Alert:
         self.lastUpdatedUnix = lastUpdatedUnix
         self.trend = trend
         self.status = status
+        self.trend12 = trend12
+        self.status12 = status12
         self.touchCount = touchCount
         self.latestTouchUnix = latestTouchUnix
         self.touchCount12 = touchCount12

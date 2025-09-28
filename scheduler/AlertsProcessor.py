@@ -91,7 +91,7 @@ class AlertsProcessor:
             
             elif currentTrend12 == TrendType.BULLISH.value and previousTrend12 != TrendType.BEARISH.value:
                 # Check for EMA 12/21 touches during bullish trend
-                if self.isEMATouched(candle) and existingAlert.shouldRecordTouch12(candle.unixTime, self.TOUCH_THRESHOLD_SECONDS):
+                if self.isEMATouched(candle) and existingAlert.shouldRecordTouch(candle.unixTime, self.TOUCH_THRESHOLD_SECONDS):
                     existingAlert.recordTouch12(candle.unixTime)
                     logger.info(f"EMA 12/21 touch recorded for {tokenAddress} {timeframeRecord.timeframe}")
                     self.sendBandTouchNotification(ChatCredentials.BAND_TOUCH_CHAT.value, trackedToken, timeframeRecord, candle, existingAlert)
@@ -397,7 +397,9 @@ class AlertsProcessor:
                 pairAddress=pairAddress,
                 timeframe=timeframe,
                 trend=TrendType.NEUTRAL.value,
-                status=None
+                trend12=TrendType.NEUTRAL.value,
+                status=None,
+                status12=None
             )
             alerts.append(alert)
         

@@ -1732,7 +1732,9 @@ class TradingHandler(BaseDBHandler):
                                 alert.trend12,
                                 alert.status12,
                                 alert.touchCount,
-                                alert.latestTouchUnix
+                                alert.latestTouchUnix,
+                                alert.touchCount12,
+                                alert.latestTouchUnix12
                             ))
                             totalAlertsUpdated += 1
                             
@@ -1756,8 +1758,8 @@ class TradingHandler(BaseDBHandler):
                         INSERT INTO alerts 
                         (tokenid, tokenaddress, pairaddress, timeframe, vwap, ema12, ema21, ema34, avwap,
                          lastupdatedunix, trend, status, trend12, status12, touchcount, latesttouchunix,
-                         createdat, lastupdatedat)
-                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, NOW(), NOW())
+                         touchcount12, latesttouchunix12, createdat, lastupdatedat)
+                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, NOW(), NOW())
                         ON CONFLICT (tokenaddress, timeframe) 
                         DO UPDATE SET 
                             vwap = EXCLUDED.vwap,
@@ -1772,6 +1774,8 @@ class TradingHandler(BaseDBHandler):
                             status12 = EXCLUDED.status12,
                             touchcount = EXCLUDED.touchcount,
                             latesttouchunix = EXCLUDED.latesttouchunix,
+                            touchcount12 = EXCLUDED.touchcount12,
+                            latesttouchunix12 = EXCLUDED.latesttouchunix12,
                             lastupdatedat = NOW()
                     """, alertData)
                 
@@ -1822,6 +1826,8 @@ class TradingHandler(BaseDBHandler):
                             a.status12 as alert_status12,
                             a.touchcount,
                             a.latesttouchunix,
+                            a.touchcount12,
+                            a.latesttouchunix12,
                             tt.trackedtokenid,
                             tt.symbol,
                             tt.name,
@@ -1926,7 +1932,9 @@ class TradingHandler(BaseDBHandler):
                             trend12=row['alert_trend12'],
                             status12=row['alert_status12'],
                             touchCount=row['touchcount'],
-                            latestTouchUnix=row['latesttouchunix']
+                            latestTouchUnix=row['latesttouchunix'],
+                            touchCount12=row['touchcount12'],
+                            latestTouchUnix12=row['latesttouchunix12']
                         )
                         
                         if row['ema12availabletime']:
