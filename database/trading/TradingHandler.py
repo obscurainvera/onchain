@@ -1,6 +1,5 @@
 from config.Config import get_config
-from decimal import Decimal
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple, TYPE_CHECKING
 from datetime import datetime
 import json
 from database.operations.BaseDBHandler import BaseDBHandler
@@ -8,16 +7,23 @@ from database.operations.DatabaseConnectionManager import DatabaseConnectionMana
 from logs.logger import get_logger
 from sqlalchemy import text
 from enum import IntEnum
-from datetime import datetime, timezone, timedelta
-from actions.TradingActionUtil import TradingActionUtil
-from scheduler.SchedulerConstants import CandleDataKeys
-from constants.TradingConstants import TimeframeConstants
+from datetime import datetime, timezone
+
 
 import time
 from utils.CommonUtil import CommonUtil
 from typing import Any
 from constants.TradingHandlerConstants import TradingHandlerConstants
 from utils.IndicatorConstants import IndicatorConstants
+from api.trading.request import OHLCVDetails, VWAPSession
+from api.trading.request import TimeframeRecord
+from api.trading.request import TrackedToken
+from api.trading.request import EMAState
+from api.trading.request import AVWAPState
+from api.trading.request import TrackedToken, TimeframeRecord, OHLCVDetails, Alert
+# Add EMA available times for processing
+from api.trading.request import EMAState        
+
 
 logger = get_logger(__name__)
 
@@ -108,8 +114,14 @@ class TradingHandler(BaseDBHandler):
                 volume DECIMAL(20,4) NOT NULL,
                 trades INTEGER DEFAULT 0,
                 vwapvalue DECIMAL(20,8),
+                avwapvalue DECIMAL(20,8),
+                ema12value DECIMAL(20,8),
                 ema21value DECIMAL(20,8),
                 ema34value DECIMAL(20,8),
+                trend VARCHAR(20),
+                status VARCHAR(50),
+                trend12 VARCHAR(20),
+                status12 VARCHAR(50),
                 iscomplete BOOLEAN DEFAULT TRUE,
                 datasource VARCHAR(20) DEFAULT 'api',
                 createdat TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
@@ -156,6 +168,51 @@ class TradingHandler(BaseDBHandler):
                 createdat TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
                 lastupdatedat TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
                 PRIMARY KEY (tokenaddress, timeframe)
+            )
+        """))
+        
+        # 6. AVWAP States
+        cursor.execute(text("""
+            CREATE TABLE IF NOT EXISTS avwapstates (
+                tokenaddress CHAR(44),
+                pairaddress CHAR(44),
+                timeframe VARCHAR(10),
+                avwap DECIMAL(20,8),
+                cumulativepv DECIMAL(30,8),
+                cumulativevolume DECIMAL(30,8),
+                lastupdatedunix BIGINT,
+                nextfetchtime BIGINT,
+                createdat TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+                lastupdatedat TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+                PRIMARY KEY (tokenaddress, timeframe)
+            )
+        """))
+        
+        # 7. Alerts
+        cursor.execute(text("""
+            CREATE TABLE IF NOT EXISTS alerts (
+                alertid BIGSERIAL PRIMARY KEY,
+                tokenid BIGINT NOT NULL,
+                tokenaddress CHAR(44) NOT NULL,
+                pairaddress CHAR(44) NOT NULL,
+                timeframe VARCHAR(10) NOT NULL,
+                vwap DECIMAL(20,8),
+                ema12 DECIMAL(20,8),
+                ema21 DECIMAL(20,8),
+                ema34 DECIMAL(20,8),
+                avwap DECIMAL(20,8),
+                lastupdatedunix BIGINT,
+                trend VARCHAR(20),
+                status VARCHAR(50),
+                trend12 VARCHAR(20),
+                status12 VARCHAR(50),
+                touchcount INTEGER DEFAULT 0,
+                latesttouchunix BIGINT,
+                touchcount12 INTEGER DEFAULT 0,
+                latesttouchunix12 BIGINT,
+                createdat TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+                lastupdatedat TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+                UNIQUE(tokenaddress, timeframe)
             )
         """))
         
@@ -312,184 +369,8 @@ class TradingHandler(BaseDBHandler):
         return CommonUtil.calculateInitialStartTime(unixtime, timeframe)
 
     
-    def batchPersistAllCandles(self, candleData: Dict[str, Dict]) -> int:
-        """
-        OPTIMIZED: Batch persist ALL candles from multiple tokens with multiple timeframes
-        
-        NEW FLOW COMPATIBLE:
-        - Handles keys like "token_address_timeframe" format
-        - Supports multiple timeframes per token (30min, 1h, 4h)
-        - Updates timeframemetadata with proper lastfetchedat and nextfetchat
-        
-        Args:
-            candleData: Dict mapping "token_address_timeframe" -> {
-                'candles': List[Dict],
-                'latest_time': int,
-                'count': int
-            }
-            
-        Returns:
-            int: Number of successfully persisted candles
-        """
-        try:
-            if not candleData:
-                return 0
-            
-            totalCandles = 0
-            
-            with self.conn_manager.transaction() as cursor:
-                # STEP 1: Parse data and build update structures
-                timeframeUpdateData = []
-                ohlcvDetailsData = []
-                
-                for key, data in candleData.items():
-                    candles = data[CandleDataKeys.CANDLES]
-                    if not candles:
-                        continue
-                    
-                    # Extract token address and timeframe from key
-                    tokenAddress, timeframe = self.findTokenAddressAndTimeframeFromKey(key)
-                    if not tokenAddress or not timeframe:
-                        logger.warning(f"Invalid candle data key format: {key}")
-                        continue
-                        
-                    # Get metadata from first candle and data
-                    firstCandle = candles[0]
-                    pairAddress = firstCandle[TradingHandlerConstants.OHLCVDetails.PAIR_ADDRESS]
-                    latestTime = data[CandleDataKeys.LATEST_TIME]
-                    
-                    # Calculate next fetch time based on timeframe
-                    nextFetchTime = self.calculateNextFetchTimeForTimeframe(latestTime, timeframe)
-                    
-                    # Prepare timeframe update data
-                    timeframeUpdateData.append((
-                        tokenAddress, pairAddress, timeframe,
-                        latestTime, nextFetchTime
-                    ))
-                    
-                    # Prepare candle insert data
-                    for candle in candles:
-                        ohlcvDetailsData.append((
-                            candle[TradingHandlerConstants.OHLCVDetails.TOKEN_ADDRESS], 
-                            candle[TradingHandlerConstants.OHLCVDetails.PAIR_ADDRESS], 
-                            candle[TradingHandlerConstants.OHLCVDetails.TIMEFRAME],
-                            candle[TradingHandlerConstants.OHLCVDetails.UNIX_TIME], 
-                            candle[TradingHandlerConstants.OHLCVDetails.OPEN_PRICE], 
-                            candle[TradingHandlerConstants.OHLCVDetails.HIGH_PRICE],
-                            candle[TradingHandlerConstants.OHLCVDetails.LOW_PRICE], 
-                            candle[TradingHandlerConstants.OHLCVDetails.CLOSE_PRICE], 
-                            candle[TradingHandlerConstants.OHLCVDetails.VOLUME], 
-                            int(candle.get(TradingHandlerConstants.OHLCVDetails.TRADES, 0)), 
-                            candle[TradingHandlerConstants.OHLCVDetails.DATA_SOURCE]
-                        ))
-                        totalCandles += 1
-                
-                # STEP 2: Update timeframe metadata and get IDs
-                timeframePKIds = self.batchUpdateTimeframe(cursor, timeframeUpdateData)
-                
-                # STEP 3: Insert candles with timeframe IDs
-                if ohlcvDetailsData:
-                    self.batchRecordCandlesIntoOHLCV(cursor, ohlcvDetailsData, timeframePKIds)
-            
-            logger.info(f"Batch persisted {totalCandles} candles across {len(candleData)} token-timeframe combinations")
-            return totalCandles
-            
-        except Exception as e:
-            logger.error(f"Error in batch persist candles: {e}")
-            return 0
-    
-    def findTokenAddressAndTimeframeFromKey(self, key: str) -> Tuple[str, str]:
-        """Parse candle data key to extract token address and timeframe"""
-        try:
-            # Key format: "token_address_timeframe" 
-            parts = key.rsplit('_', 1)  # Split from right to handle addresses with underscores
-            if len(parts) == 2:
-                return parts[0], parts[1]
-        except Exception:
-            return None, None
-    
-    def calculateNextFetchTimeForTimeframe(self, latestTime: int, timeframe: str) -> int:
-        """Calculate next fetch time based on specific timeframe - delegates to CommonUtil"""
-        return CommonUtil.calculateNextFetchTimeForTimeframe(latestTime, timeframe)
-    
-    def batchUpdateTimeframe(self, cursor, timeframeUpdateData: List[Tuple]) -> Dict[Tuple, int]:
-        """Update timeframe metadata and return mapping of (token, timeframe) -> id"""
-        timeframePKIds = {}
-        
-        if not timeframeUpdateData:
-            return timeframePKIds
-        
-        for tokenAddress, pairAddress, timeframe, lastFetchTime, nextFetchTime in timeframeUpdateData:
-            cursor.execute("""
-                INSERT INTO timeframemetadata 
-                (tokenaddress, pairaddress, timeframe, lastfetchedat, nextfetchat, createdat, lastupdatedat)
-                VALUES (%s, %s, %s, %s, %s, NOW(), NOW())
-                ON CONFLICT (tokenaddress, pairaddress, timeframe) 
-                DO UPDATE SET 
-                    lastfetchedat = %s,
-                    nextfetchat = %s,
-                    lastupdatedat = NOW()
-                RETURNING id
-            """, (
-                tokenAddress, pairAddress, timeframe,
-                lastFetchTime, nextFetchTime,
-                lastFetchTime, nextFetchTime
-            ))
-            
-            result = cursor.fetchone()
-            timeframe_id = result['id']
-            timeframePKIds[(tokenAddress, timeframe)] = timeframe_id
-        
-        return timeframePKIds
-    
-    def batchRecordCandlesIntoOHLCV(self, cursor, ohlcvDetailsData: List[Tuple], timeframeIds: Dict[Tuple, int]):
-        """Insert candles with proper timeframe IDs and timebuckets"""
-        if not ohlcvDetailsData:
-            return
-        
-        candleInsertData = []
-        
-        for candle in ohlcvDetailsData:
-            tokenAddress = candle[0]
-            timeframe = candle[2]
-            timeframePK = timeframeIds.get((tokenAddress, timeframe))
-            
-            if timeframePK:
-                unixtime = candle[3]
-                timebucket = self._calculateTimeBucket(unixtime, timeframe)
-                
-                candleInsertData.append((
-                    timeframePK,    # timeframeid
-                    candle[0],  # tokenaddress
-                    candle[1],  # pairaddress
-                    candle[2],  # timeframe
-                    candle[3],  # unixtime
-                    timebucket,      # timebucket
-                    candle[4],  # openprice
-                    candle[5],  # highprice
-                    candle[6],  # lowprice
-                    candle[7],  # closeprice
-                    candle[8],  # volume
-                    candle[9],  # trades
-                    candle[10]   # datasource
-                ))
-        
-        if candleInsertData:
-            cursor.executemany("""
-                INSERT INTO ohlcvdetails 
-                (timeframeid, tokenaddress, pairaddress, timeframe, unixtime, timebucket, 
-                 openprice, highprice, lowprice, closeprice, volume, trades, datasource)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-                ON CONFLICT (tokenaddress, timeframe, unixtime) DO NOTHING
-            """, candleInsertData)
-    
-    def getAllVWAPDataForScheduler(self) -> Dict[str, Dict[str, Dict]]:
-        """
-        Get all VWAP data for scheduler processing - all active tokens and timeframes.
-        
-        Returns:
-            Dict: {token_address: {timeframe: vwap_data_dict}}
-        """
+    def getAllVWAPDataForScheduler(self) -> List['TrackedToken']:
+
         try:
             with self.conn_manager.transaction() as cursor:
                 # Get all active tokens with their timeframes and VWAP session data
@@ -497,6 +378,7 @@ class TradingHandler(BaseDBHandler):
                     SELECT 
                         tt.tokenaddress,
                         tt.pairaddress,
+                        tm.id as timeframeid,
                         tm.timeframe,
                         tm.lastfetchedat,
                         vs.sessionstartunix,
@@ -526,125 +408,98 @@ class TradingHandler(BaseDBHandler):
                 
                 records = cursor.fetchall()
                 
-                # Group data by token and timeframe
-                vwapDataByToken = {}
+                # Track seen candle timestamps per timeframe to prevent duplicates (space and time efficient)
+                seenCandles = {}  # {tokenAddress: {timeframe: set(unixTimes)}}
+                trackedTokensMap = {}
                 
                 for record in records:
                     tokenAddress = record[TradingHandlerConstants.TrackedTokens.TOKEN_ADDRESS]
                     pairAddress = record[TradingHandlerConstants.TrackedTokens.PAIR_ADDRESS]
                     timeframe = record[TradingHandlerConstants.TimeframeMetadata.TIMEFRAME]
+                    timeframeId = record['timeframeid']
                     
-                    if tokenAddress not in vwapDataByToken:
-                        vwapDataByToken[tokenAddress] = {}
+                    # Create or get existing TrackedToken
+                    if tokenAddress not in trackedTokensMap:
+                        trackedTokensMap[tokenAddress] = TrackedToken(
+                            trackedTokenId=record.get(TradingHandlerConstants.TrackedTokens.TRACKED_TOKEN_ID, 0),
+                            tokenAddress=tokenAddress,
+                            symbol=record.get(TradingHandlerConstants.TrackedTokens.SYMBOL, ''),
+                            name=record.get(TradingHandlerConstants.TrackedTokens.NAME, ''),
+                            pairAddress=pairAddress,
+                            pairCreatedTime=record.get(TradingHandlerConstants.TrackedTokens.PAIR_CREATED_TIME, 0),
+                            addedBy='scheduler'
+                        )
                     
-                    if timeframe not in vwapDataByToken[tokenAddress]:
-                        # Initialize timeframe data
-                        vwapDataByToken[tokenAddress][timeframe] = {
-                            TradingHandlerConstants.TrackedTokens.TOKEN_ADDRESS: tokenAddress,
-                            TradingHandlerConstants.TrackedTokens.PAIR_ADDRESS: pairAddress,
-                            TradingHandlerConstants.TimeframeMetadata.TIMEFRAME: timeframe,
-                            TradingHandlerConstants.TimeframeMetadata.LAST_FETCHED_AT: record[TradingHandlerConstants.TimeframeMetadata.LAST_FETCHED_AT],
-                            TradingHandlerConstants.VWAPSessions.SESSION_START_UNIX: record[TradingHandlerConstants.VWAPSessions.SESSION_START_UNIX],
-                            TradingHandlerConstants.VWAPSessions.SESSION_END_UNIX: record[TradingHandlerConstants.VWAPSessions.SESSION_END_UNIX],
-                            TradingHandlerConstants.VWAPSessions.CUMULATIVE_PV: record[TradingHandlerConstants.VWAPSessions.CUMULATIVE_PV],
-                            TradingHandlerConstants.VWAPSessions.CUMULATIVE_VOLUME: record[TradingHandlerConstants.VWAPSessions.CUMULATIVE_VOLUME],
-                            TradingHandlerConstants.VWAPSessions.CURRENT_VWAP: record[TradingHandlerConstants.VWAPSessions.CURRENT_VWAP],
-                            TradingHandlerConstants.VWAPSessions.LAST_CANDLE_UNIX: record[TradingHandlerConstants.VWAPSessions.LAST_CANDLE_UNIX] or 0,
-                            TradingHandlerConstants.VWAPSessions.NEXT_CANDLE_FETCH: record[TradingHandlerConstants.VWAPSessions.NEXT_CANDLE_FETCH],
-                            IndicatorConstants.VWAPSessions.CANDLES: []
-                        }
+                    # Get or create TimeframeRecord
+                    timeframeRecord = trackedTokensMap[tokenAddress].getTimeframeRecord(timeframe)
+                    if not timeframeRecord:
+                        timeframeRecord = TimeframeRecord(
+                            timeframeId=timeframeId,
+                            tokenAddress=tokenAddress,
+                            pairAddress=pairAddress,
+                            timeframe=timeframe,
+                            lastFetchedAt=record[TradingHandlerConstants.TimeframeMetadata.LAST_FETCHED_AT],
+                            isActive=True
+                        )
+                        trackedTokensMap[tokenAddress].addTimeframeRecord(timeframeRecord)
+                    
+                    # Create VWAPSession POJO
+                    if not timeframeRecord.vwapSession:
+                        timeframeRecord.vwapSession = VWAPSession(
+                            tokenAddress=tokenAddress,
+                            pairAddress=pairAddress,
+                            timeframe=timeframe,
+                            sessionStartUnix=record[TradingHandlerConstants.VWAPSessions.SESSION_START_UNIX],
+                            sessionEndUnix=record[TradingHandlerConstants.VWAPSessions.SESSION_END_UNIX],
+                            cumulativePV=record[TradingHandlerConstants.VWAPSessions.CUMULATIVE_PV],
+                            cumulativeVolume=record[TradingHandlerConstants.VWAPSessions.CUMULATIVE_VOLUME],
+                            currentVWAP=record[TradingHandlerConstants.VWAPSessions.CURRENT_VWAP],
+                            lastCandleUnix=record[TradingHandlerConstants.VWAPSessions.LAST_CANDLE_UNIX] or 0,
+                            nextCandleFetch=record[TradingHandlerConstants.VWAPSessions.NEXT_CANDLE_FETCH]
+                        )
                     
                     # Add candle data if available
                     if record[TradingHandlerConstants.OHLCVDetails.UNIX_TIME] is not None:
-                        candle = {
-                            TradingHandlerConstants.OHLCVDetails.UNIX_TIME: record[TradingHandlerConstants.OHLCVDetails.UNIX_TIME],
-                            TradingHandlerConstants.OHLCVDetails.OPEN_PRICE: record[TradingHandlerConstants.OHLCVDetails.OPEN_PRICE],
-                            TradingHandlerConstants.OHLCVDetails.HIGH_PRICE: record[TradingHandlerConstants.OHLCVDetails.HIGH_PRICE],
-                            TradingHandlerConstants.OHLCVDetails.LOW_PRICE: record[TradingHandlerConstants.OHLCVDetails.LOW_PRICE],
-                            TradingHandlerConstants.OHLCVDetails.CLOSE_PRICE: record[TradingHandlerConstants.OHLCVDetails.CLOSE_PRICE],
-                            TradingHandlerConstants.OHLCVDetails.VOLUME: record[TradingHandlerConstants.OHLCVDetails.VOLUME]
-                        }
-                        vwapDataByToken[tokenAddress][timeframe][IndicatorConstants.VWAPSessions.CANDLES].append(candle)
+                        candleUnixTime = record[TradingHandlerConstants.OHLCVDetails.UNIX_TIME]
+                        
+                        # Initialize seenCandles structure if needed
+                        if tokenAddress not in seenCandles:
+                            seenCandles[tokenAddress] = {}
+                        if timeframe not in seenCandles[tokenAddress]:
+                            seenCandles[tokenAddress][timeframe] = set()
+                        
+                        # O(1) check if candle already exists using set
+                        if candleUnixTime not in seenCandles[tokenAddress][timeframe]:
+                            # Mark as seen
+                            seenCandles[tokenAddress][timeframe].add(candleUnixTime)
+                            
+                            ohlcvDetail = OHLCVDetails(
+                                tokenAddress=tokenAddress,
+                                pairAddress=pairAddress,
+                                timeframe=timeframe,
+                                unixTime=candleUnixTime,
+                                timeBucket=CommonUtil.calculateInitialStartTime(candleUnixTime, timeframe),
+                                openPrice=record[TradingHandlerConstants.OHLCVDetails.OPEN_PRICE],
+                                highPrice=record[TradingHandlerConstants.OHLCVDetails.HIGH_PRICE],
+                                lowPrice=record[TradingHandlerConstants.OHLCVDetails.LOW_PRICE],
+                                closePrice=record[TradingHandlerConstants.OHLCVDetails.CLOSE_PRICE],
+                                volume=record[TradingHandlerConstants.OHLCVDetails.VOLUME],
+                                trades=record.get(TradingHandlerConstants.OHLCVDetails.TRADES, 0),
+                                isComplete=True,
+                                dataSource=record.get(TradingHandlerConstants.OHLCVDetails.DATA_SOURCE, 'moralis')
+                            )
+                            timeframeRecord.addOHLCVDetail(ohlcvDetail)
                 
-                logger.info(f"Retrieved VWAP data for {len(vwapDataByToken)} active tokens")
-                return vwapDataByToken
+                trackedTokens = list(trackedTokensMap.values())
+                return trackedTokens
                 
         except Exception as e:
             logger.error(f"Error getting all VWAP data for scheduler: {e}")
-            return {}
+            return []
     
-    def batchUpdateVWAPData(self, vwapCandleUpdatedData: List[Dict], vwapSessionUpdatedData: List[Dict]) -> bool:
-        """
-        Batch update VWAP values and sessions for all tokens at once
-        
-        Args:
-            vwap_updates: List of candle VWAP updates 
-            session_updates: List of session updates/creates
-        
-        Returns:
-            bool: True if successful
-        """
-        try:
-            with self.conn_manager.transaction() as cursor:
-                # STEP 1: Batch update OHLCV VWAP values
-                if vwapCandleUpdatedData:
-                    vwapCandleData = []
-                    for update in vwapCandleUpdatedData:
-                        vwapCandleData.append((
-                            float(update[TradingHandlerConstants.OHLCVDetails.VWAP_VALUE]),
-                            update[TradingHandlerConstants.OHLCVDetails.TOKEN_ADDRESS],
-                            update[TradingHandlerConstants.OHLCVDetails.TIMEFRAME], 
-                            update[TradingHandlerConstants.OHLCVDetails.UNIX_TIME]
-                        ))
-                    
-                    cursor.executemany("""
-                        UPDATE ohlcvdetails 
-                        SET vwapvalue = %s, lastupdatedat = NOW()
-                        WHERE tokenaddress = %s AND timeframe = %s AND unixtime = %s
-                    """, vwapCandleData)
-                
-                # STEP 2: Batch update/insert VWAP sessions
-                if vwapSessionUpdatedData:
-                    vwapSessionData = []
-                    for update in vwapSessionUpdatedData:
-                        vwapSessionData.append((
-                            update[TradingHandlerConstants.VWAPSessions.TOKEN_ADDRESS],
-                            update[TradingHandlerConstants.VWAPSessions.PAIR_ADDRESS],
-                            update[TradingHandlerConstants.VWAPSessions.TIMEFRAME],
-                            update[TradingHandlerConstants.VWAPSessions.SESSION_START_UNIX],
-                            update[TradingHandlerConstants.VWAPSessions.SESSION_END_UNIX],
-                            float(update[TradingHandlerConstants.VWAPSessions.CUMULATIVE_PV]),
-                            float(update[TradingHandlerConstants.VWAPSessions.CUMULATIVE_VOLUME]),
-                            float(update[TradingHandlerConstants.VWAPSessions.CURRENT_VWAP]),
-                            update[TradingHandlerConstants.VWAPSessions.LAST_CANDLE_UNIX],
-                            update[TradingHandlerConstants.VWAPSessions.NEXT_CANDLE_FETCH]
-                        ))
-                    
-                    cursor.executemany("""
-                        INSERT INTO vwapsessions 
-                        (tokenaddress, pairaddress, timeframe, sessionstartunix, sessionendunix,
-                         cumulativepv, cumulativevolume, currentvwap, lastcandleunix, nextcandlefetch,
-                         createdat, lastupdatedat)
-                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, NOW(), NOW())
-                        ON CONFLICT (tokenaddress, timeframe) 
-                        DO UPDATE SET
-                            sessionstartunix = EXCLUDED.sessionstartunix,
-                            sessionendunix = EXCLUDED.sessionendunix,
-                            cumulativepv = EXCLUDED.cumulativepv,
-                            cumulativevolume = EXCLUDED.cumulativevolume,
-                            currentvwap = EXCLUDED.currentvwap,
-                            lastcandleunix = EXCLUDED.lastcandleunix,
-                            nextcandlefetch = EXCLUDED.nextcandlefetch,
-                            lastupdatedat = NOW()
-                    """, vwapSessionData)
-                
-                return True
-                
-        except Exception as e:
-            logger.error(f"Error in batch VWAP update: {e}")
-            return False
     
-    def getAllEMADataWithCandlesForScheduler(self) -> Dict[str, Dict]:
+    
+    def getAllEMADataWithCandlesForScheduler(self) -> List['TrackedToken']:
         """
         SINGLE OPTIMIZED QUERY: Get all EMA data with corresponding candles for scheduler
         
@@ -654,27 +509,8 @@ class TradingHandler(BaseDBHandler):
         3. JOIN with ohlcvdetails to get candles where unixtime > lastupdatedunix
         4. All in one highly optimized query for scalability
         
-        Args:
-            timeframes: List of timeframes to process (e.g., ['15m', '1h', '4h'])
-            ema_periods: List of EMA periods to process (e.g., [21, 34])
-            
         Returns:
-            Dict: {
-                token_address: {
-                    pair_id: pair_address,
-                    ema21: {
-                        timeframe: {
-                            ema_value: current_ema_value,
-                            last_updated_at: last_updated_unix,
-                            status: ema_status,
-                            ema_available_at: ema_available_time,
-                            last_fetched_at: last_fetched_time,
-                            candles: [list_of_candles]
-                        }
-                    },
-                    ema34: { ... }
-                }
-            }
+            List[TrackedToken]: List of tracked tokens with EMA data and candles
         """
         try:        
             with self.conn_manager.transaction() as cursor:
@@ -690,6 +526,7 @@ class TradingHandler(BaseDBHandler):
                             es.status,
                             es.lastupdatedunix,
                             es.emaavailabletime,
+                            tmf.id as timeframeid,
                             tmf.lastfetchedat,
                             CASE 
                                 WHEN es.status = 2 THEN es.lastupdatedunix  -- AVAILABLE: get candles after last updated
@@ -720,6 +557,7 @@ class TradingHandler(BaseDBHandler):
                         ed.tokenaddress,
                         ed.pairaddress,
                         ed.timeframe,
+                        ed.timeframeid,
                         ed.emakey,
                         ed.emavalue,
                         ed.status,
@@ -736,52 +574,110 @@ class TradingHandler(BaseDBHandler):
                     ORDER BY ed.tokenaddress, ed.timeframe, ed.emakey, cd.unixtime ASC
                 """))
                 
-                # Organize results into the required structure
-                results = {}
+                # Organize results into POJOs
+                trackedTokens = {}
+                # Track seen candle timestamps per timeframe to prevent duplicates (space and time efficient)
+                seenCandles = {}  # {tokenAddress: {timeframe: set(unixTimes)}}
+
+                records = cursor.fetchall()
                 
-                for row in cursor.fetchall():
+                for row in records:
                     tokenAddress = row[TradingHandlerConstants.EMAStates.TOKEN_ADDRESS]
                     pairAddress = row[TradingHandlerConstants.EMAStates.PAIR_ADDRESS]
                     timeframe = row[TradingHandlerConstants.EMAStates.TIMEFRAME]
+                    timeframeId = row['timeframeid'] 
                     emaKey = row[TradingHandlerConstants.EMAStates.EMA_KEY]
                     emaPeriod = int(emaKey)
                     
-                    # Initialize token structure if not exists
-                    if tokenAddress not in results:
-                        results[tokenAddress] = {
-                            IndicatorConstants.EMAStates.PAIR_ID: pairAddress,
-                            IndicatorConstants.EMAStates.EMA21: {},
-                            IndicatorConstants.EMAStates.EMA34: {}
-                        }
+                    # Initialize TrackedToken if not exists
+                    if tokenAddress not in trackedTokens:
+                        trackedTokens[tokenAddress] = TrackedToken(
+                            trackedTokenId=0,  # Will be set from database if needed
+                            tokenAddress=tokenAddress,
+                            symbol='',  # Not needed for EMA processing
+                            name='',    # Not needed for EMA processing
+                            pairAddress=pairAddress,
+                            addedBy='scheduler'
+                        )
                     
-                    # Initialize EMA structure if not exists
-                    ema_key_lower = f"ema{emaPeriod}"
-                    if timeframe not in results[tokenAddress][ema_key_lower]:
-                        results[tokenAddress][ema_key_lower][timeframe] = {
-                            TradingHandlerConstants.EMAStates.EMA_VALUE: float(row[TradingHandlerConstants.EMAStates.EMA_VALUE]) if row[TradingHandlerConstants.EMAStates.EMA_VALUE] else None,
-                            TradingHandlerConstants.EMAStates.LAST_UPDATED_UNIX: row[TradingHandlerConstants.EMAStates.LAST_UPDATED_UNIX],
-                            TradingHandlerConstants.EMAStates.STATUS: row[TradingHandlerConstants.EMAStates.STATUS],
-                            TradingHandlerConstants.EMAStates.EMA_AVAILABLE_TIME: row[TradingHandlerConstants.EMAStates.EMA_AVAILABLE_TIME],
-                            TradingHandlerConstants.TimeframeMetadata.LAST_FETCHED_AT: row[TradingHandlerConstants.TimeframeMetadata.LAST_FETCHED_AT],
-                            IndicatorConstants.EMAStates.CANDLES: []
-                        }
+                    # Get or create TimeframeRecord for this timeframe
+                    timeframeRecord = trackedTokens[tokenAddress].getTimeframeRecord(timeframe)
+                    if not timeframeRecord:
+                        timeframeRecord = TimeframeRecord(
+                            timeframeId=timeframeId,
+                            tokenAddress=tokenAddress,
+                            pairAddress=pairAddress,
+                            timeframe=timeframe,
+                            nextFetchAt=row[TradingHandlerConstants.TimeframeMetadata.LAST_FETCHED_AT] or 0,
+                            lastFetchedAt=row[TradingHandlerConstants.TimeframeMetadata.LAST_FETCHED_AT],
+                            isActive=True
+                        )
+                        trackedTokens[tokenAddress].addTimeframeRecord(timeframeRecord)
                     
-                    # Add candle if exists
+                    # Create or update EMAState
+                    emaState = EMAState(
+                        tokenAddress=tokenAddress,
+                        pairAddress=pairAddress,
+                        timeframe=timeframe,
+                        emaKey=emaKey,
+                        emaValue=float(row[TradingHandlerConstants.EMAStates.EMA_VALUE]) if row[TradingHandlerConstants.EMAStates.EMA_VALUE] else None,
+                        lastUpdatedUnix=row[TradingHandlerConstants.EMAStates.LAST_UPDATED_UNIX],
+                        nextFetchTime=None,  # Will be calculated during processing
+                        emaAvailableTime=row[TradingHandlerConstants.EMAStates.EMA_AVAILABLE_TIME],
+                        pairCreatedTime=None,  # Not needed for EMA processing
+                        status=row[TradingHandlerConstants.EMAStates.STATUS]
+                    )
+                    
+                    # Set EMAState in TimeframeRecord
+                    if emaPeriod == 12:
+                        timeframeRecord.ema12State = emaState
+                    elif emaPeriod == 21:
+                        timeframeRecord.ema21State = emaState
+                    elif emaPeriod == 34:
+                        timeframeRecord.ema34State = emaState
+                    
+                    # Add candle data if exists (only close price needed for EMA)
                     if row[IndicatorConstants.EMAStates.CANDLE_UNIX_TIME]:
-                        results[tokenAddress][ema_key_lower][timeframe][IndicatorConstants.EMAStates.CANDLES].append({
-                            IndicatorConstants.EMAStates.CANDLE_UNIX_TIME: row[IndicatorConstants.EMAStates.CANDLE_UNIX_TIME],
-                            IndicatorConstants.EMAStates.CANDLE_CLOSE_PRICE: float(row[IndicatorConstants.EMAStates.CANDLE_CLOSE_PRICE])
-                        })
+                        candleUnixTime = row[IndicatorConstants.EMAStates.CANDLE_UNIX_TIME]
+                        
+                        # Initialize seenCandles structure if needed
+                        if tokenAddress not in seenCandles:
+                            seenCandles[tokenAddress] = {}
+                        if timeframe not in seenCandles[tokenAddress]:
+                            seenCandles[tokenAddress][timeframe] = set()
+                        
+                        # O(1) check if candle already exists using set
+                        if candleUnixTime not in seenCandles[tokenAddress][timeframe]:
+                            # Mark as seen
+                            seenCandles[tokenAddress][timeframe].add(candleUnixTime)
+                            
+                            # Create OHLCVDetails with only close price (EMA only needs close price)
+                            candle = OHLCVDetails(
+                                tokenAddress=tokenAddress,
+                                pairAddress=pairAddress,
+                                timeframe=timeframe,
+                                unixTime=candleUnixTime,
+                                timeBucket=self._calculateTimeBucket(candleUnixTime, timeframe),
+                                openPrice=0.0,  # Not needed for EMA
+                                highPrice=0.0,  # Not needed for EMA
+                                lowPrice=0.0,   # Not needed for EMA
+                                closePrice=float(row[IndicatorConstants.EMAStates.CANDLE_CLOSE_PRICE]),
+                                volume=0.0,     # Not needed for EMA
+                                trades=0,       # Not needed for EMA
+                                isComplete=True,
+                                dataSource='database'
+                            )
+                            timeframeRecord.addOHLCVDetail(candle)
                 
-                return results
+                return list(trackedTokens.values())
                 
         except Exception as e:
             logger.error(f"Error getting EMA data with candles for scheduler: {e}")
-            return {}
+            return []
 
 
     def createTimeframeInitialRecords(self, tokenAddress: str, pairAddress: str, timeframes: List[str], 
-                                    pairCreatedTime: int) -> bool:
+                                    pairCreatedTime: int) -> List:
         """
         Create initial timeframe metadata records for new tokens with proper nextfetchat calculation
         
@@ -795,27 +691,46 @@ class TradingHandler(BaseDBHandler):
             pairCreatedTime: Unix timestamp when pair was created
             
         Returns:
-            bool: Success status
+            List[TimeframeRecord]: List of TimeframeRecord POJOs
         """
         try:
             if not timeframes:
                 logger.info(f"No timeframes provided for {tokenAddress}")
-                return True
+                return []
                 
+            # Collect data for timeframe records (outside transaction)
+            timeframeRecords = self.collectDataForInitialTimeframeEntry(
+                tokenAddress, pairAddress, timeframes, pairCreatedTime
+            )
+            
+            if not timeframeRecords:
+                logger.info(f"No timeframe records to create for {tokenAddress}")
+                return []
+            
+            # Execute database operations in transaction
             with self.conn_manager.transaction() as cursor:
-                timeframeRecords = self.collectDataForInitialTimeframeEntry(
-                    tokenAddress, pairAddress, timeframes, pairCreatedTime
+                persistedRecords = self.recordInitialTimeframeEntry(cursor, timeframeRecords)
+            
+            # Create TimeframeRecord POJOs from persisted data
+            createdRecords = []
+            for persistedRecord in persistedRecords:
+                timeframeRecord = TimeframeRecord(
+                    timeframeId=persistedRecord[TradingHandlerConstants.TimeframeMetadata.ID],
+                    tokenAddress=persistedRecord[TradingHandlerConstants.TimeframeMetadata.TOKEN_ADDRESS],
+                    pairAddress=persistedRecord[TradingHandlerConstants.TimeframeMetadata.PAIR_ADDRESS],
+                    timeframe=persistedRecord[TradingHandlerConstants.TimeframeMetadata.TIMEFRAME],
+                    nextFetchAt=persistedRecord[TradingHandlerConstants.TimeframeMetadata.NEXT_FETCH_AT],
+                    lastFetchedAt=None,
+                    isActive=True
                 )
-                
-                if timeframeRecords:
-                    self.recordInitialTimeframeEntry(cursor, timeframeRecords)
-                    logger.info(f"Created {len(timeframeRecords)} initial timeframe records for {tokenAddress}")
-                
-                return True
+                createdRecords.append(timeframeRecord)
+            
+            logger.info(f"Created {len(createdRecords)} initial timeframe records for {tokenAddress}")
+            return createdRecords
                 
         except Exception as e:
             logger.error(f"Error creating initial timeframe records for {tokenAddress}: {e}")
-            return False
+            return []
     
     def collectDataForInitialTimeframeEntry(self, tokenAddress: str, pairAddress: str, 
                                timeframes: List[str], pairCreatedTime: int) -> List[Tuple]:
@@ -833,176 +748,30 @@ class TradingHandler(BaseDBHandler):
 
     
     def recordInitialTimeframeEntry(self, cursor, timeframeRecords: List[Tuple]):
-        """Insert timeframe records in batch"""
-        cursor.executemany("""
-            INSERT INTO timeframemetadata 
-            (tokenaddress, pairaddress, timeframe, nextfetchat, createdat, lastupdatedat)
-            VALUES (%s, %s, %s, %s, NOW(), NOW())
-            ON CONFLICT (tokenaddress, pairaddress, timeframe) DO NOTHING
-        """, timeframeRecords)
-
-    def batchUpdateEMAData(self, emaCandlesUpdatedData: List[Dict], emaStateUpdatedData: List[Dict]) -> bool:
-        """
-        Batch update EMA values and states for all tokens at once
-        
-        Args:
-            ema_updates: List of candle EMA updates 
-            state_updates: List of EMA state updates
-        
-        Returns:
-            bool: True if successful
-        """
-        try:
-            with self.conn_manager.transaction() as cursor:
-                # STEP 1: Batch update OHLCV EMA values
-                if emaCandlesUpdatedData:
-                    # Group by EMA period for efficient updates
-                    ema21Data = []
-                    ema34Data = []
-                    
-                    for stateData in emaCandlesUpdatedData:
-                        if stateData[IndicatorConstants.EMAStates.EMA_PERIOD] == IndicatorConstants.EMAStates.EMA_21:
-                            ema21Data.append((
-                                float(stateData[IndicatorConstants.EMAStates.EMA_VALUE]),
-                                stateData[TradingHandlerConstants.OHLCVDetails.TOKEN_ADDRESS],
-                                stateData[TradingHandlerConstants.OHLCVDetails.TIMEFRAME],
-                                stateData[TradingHandlerConstants.OHLCVDetails.UNIX_TIME]
-                            ))
-                        elif stateData[IndicatorConstants.EMAStates.EMA_PERIOD] == IndicatorConstants.EMAStates.EMA_34:
-                            ema34Data.append((
-                                float(stateData[IndicatorConstants.EMAStates.EMA_VALUE]),
-                                stateData[TradingHandlerConstants.OHLCVDetails.TOKEN_ADDRESS],
-                                stateData[TradingHandlerConstants.OHLCVDetails.TIMEFRAME],
-                                stateData[TradingHandlerConstants.OHLCVDetails.UNIX_TIME]
-                            ))
-                    
-                    # Batch update EMA21 values
-                    if ema21Data:
-                        cursor.executemany("""
-                            UPDATE ohlcvdetails 
-                            SET ema21value = %s, lastupdatedat = NOW()
-                            WHERE tokenaddress = %s AND timeframe = %s AND unixtime = %s
-                        """, ema21Data)
-                    
-                    # Batch update EMA34 values
-                    if ema34Data:
-                        cursor.executemany("""
-                            UPDATE ohlcvdetails 
-                            SET ema34value = %s, lastupdatedat = NOW()
-                            WHERE tokenaddress = %s AND timeframe = %s AND unixtime = %s
-                        """, ema34Data)
-                
-                # STEP 2: Batch update EMA states
-                if emaStateUpdatedData:
-                    emaStateData = []
-                    for stateData in emaStateUpdatedData:
-                        # Calculate next fetch time
-                        timeframeSeconds = CommonUtil.getTimeframeSeconds(stateData[TradingHandlerConstants.EMAStates.TIMEFRAME])
-                        nextFetchTime = stateData[TradingHandlerConstants.EMAStates.LAST_UPDATED_UNIX] + timeframeSeconds
-                        
-                        emaStateData.append((
-                            float(stateData[TradingHandlerConstants.EMAStates.EMA_VALUE]),
-                            stateData[TradingHandlerConstants.EMAStates.LAST_UPDATED_UNIX],
-                            nextFetchTime,
-                            stateData[TradingHandlerConstants.EMAStates.STATUS],
-                            stateData[TradingHandlerConstants.EMAStates.TOKEN_ADDRESS],
-                            stateData[TradingHandlerConstants.EMAStates.TIMEFRAME],
-                            str(stateData[IndicatorConstants.EMAStates.EMA_PERIOD])
-                        ))
-                    
-                    cursor.executemany("""
-                        UPDATE emastates 
-                        SET emavalue = %s, lastupdatedunix = %s, nextfetchtime = %s, 
-                            status = %s, lastupdatedat = NOW()
-                        WHERE tokenaddress = %s AND timeframe = %s AND emakey = %s
-                    """, emaStateData)
-                
-                return True
-                
-        except Exception as e:
-            logger.error(f"Error in batch EMA update: {e}")
-            return False
-
-
-    def getAllCandlesFromAllTimeframes(self, tokenAddress: str, pairAddress: str) -> Dict[str, List[Dict]]:
-        """
-        Get ALL candles for all timeframes in a single optimized database call.
-        
-        Uses LEFT JOIN to include timeframes with no candles (lastfetchedat IS NULL).
-        Returns empty lists for timeframes without candle data, enabling indicator processors
-        to create appropriate empty records.
-        
-        Args:
-            tokenAddress: Token contract address
-            pairAddress: Pair contract address
+        """Insert timeframe records in batch and return persisted data"""
+        # Insert records one by one to get RETURNING results
+        persistedRecords = []
+        for record in timeframeRecords:
+            cursor.execute("""
+                INSERT INTO timeframemetadata 
+                (tokenaddress, pairaddress, timeframe, nextfetchat, createdat, lastupdatedat)
+                VALUES (%s, %s, %s, %s, NOW(), NOW())
+                ON CONFLICT (tokenaddress, pairaddress, timeframe) 
+                DO UPDATE SET 
+                    nextfetchat = EXCLUDED.nextfetchat,
+                    lastupdatedat = NOW()
+                RETURNING id, tokenaddress, pairaddress, timeframe, nextfetchat
+            """, record)
             
-        Returns:
-            Dict mapping timeframe -> List of candle data
-        """
-        try:
-            with self.conn_manager.transaction() as cursor:
-                # Single optimized query using LEFT JOIN to get all timeframes with their candles
-                cursor.execute(text("""
-                    SELECT tm.timeframe, 
-                           ohlcv.unixtime, ohlcv.openprice, ohlcv.highprice, 
-                           ohlcv.lowprice, ohlcv.closeprice, ohlcv.volume, ohlcv.trades
-                    FROM timeframemetadata tm
-                    LEFT JOIN ohlcvdetails ohlcv ON (
-                        tm.tokenaddress = ohlcv.tokenaddress AND 
-                        tm.pairaddress = ohlcv.pairaddress AND 
-                        tm.timeframe = ohlcv.timeframe
-                    )
-                    WHERE tm.tokenaddress = %s AND tm.pairaddress = %s 
-                    AND tm.isactive = true
-                    ORDER BY tm.timeframe, ohlcv.unixtime ASC
-                """), (tokenAddress, pairAddress))
-                
-                results = cursor.fetchall()
-                
-                # Group candles by timeframe - empty lists for timeframes with no candles
-                timeframeCandlesMap = {}
-                for row in results:
-                    timeframe = row[TradingHandlerConstants.TimeframeMetadata.TIMEFRAME]
-                    
-                    # Initialize timeframe if not exists
-                    if timeframe not in timeframeCandlesMap:
-                        timeframeCandlesMap[timeframe] = []
-
-                    # Add candle data if it exists (LEFT JOIN may return NULL values)
-                    if row[TradingHandlerConstants.OHLCVDetails.UNIX_TIME] is not None:
-                        timeframeCandlesMap[timeframe].append({
-                            TradingHandlerConstants.OHLCVDetails.UNIX_TIME: row[TradingHandlerConstants.OHLCVDetails.UNIX_TIME],
-                            TradingHandlerConstants.OHLCVDetails.OPEN_PRICE: row[TradingHandlerConstants.OHLCVDetails.OPEN_PRICE],
-                            TradingHandlerConstants.OHLCVDetails.HIGH_PRICE: row[TradingHandlerConstants.OHLCVDetails.HIGH_PRICE],
-                            TradingHandlerConstants.OHLCVDetails.LOW_PRICE: row[TradingHandlerConstants.OHLCVDetails.LOW_PRICE],
-                            TradingHandlerConstants.OHLCVDetails.CLOSE_PRICE: row[TradingHandlerConstants.OHLCVDetails.CLOSE_PRICE],
-                            TradingHandlerConstants.OHLCVDetails.VOLUME: row[TradingHandlerConstants.OHLCVDetails.VOLUME],
-                            TradingHandlerConstants.OHLCVDetails.TRADES: row[TradingHandlerConstants.OHLCVDetails.TRADES]
-                        })
-                
-                logger.info(f"Retrieved candles for {len(timeframeCandlesMap)} timeframes: "
-                          f"{sum(1 for candles in timeframeCandlesMap.values() if candles)} with data, "
-                          f"{sum(1 for candles in timeframeCandlesMap.values() if not candles)} empty")
-                
-                return timeframeCandlesMap
-                
-        except Exception as e:
-            logger.error(f"Error retrieving candles for all timeframes: {e}")
-            return {}
-
-    def getAllTimeframeRecordsReadyForFetching(self, buffer_seconds: int = 300) -> List[Dict]:
-        """
-        Get ALL timeframe records (not just 15m) that are ready for data fetching
+            result = cursor.fetchone()
+            if result:
+                persistedRecords.append(result)
         
-        NEW SCHEDULER FLOW: This replaces the old 15m-only approach with multi-timeframe support.
-        Returns records for all timeframes (30min, 1h, 4h) that need updates.
-        
-        Args:
-            buffer_seconds: Buffer time for newly created tokens (default: 5 minutes)
-            
-        Returns:
-            List of timeframe records ready for processing
-        """
+        return persistedRecords
+    
+
+
+    def getAllTimeframeRecordsReadyForFetching(self, buffer_seconds: int = 300) -> List['TrackedToken']:
         try:
             currentTime = int(time.time())
             bufferTime = currentTime - buffer_seconds
@@ -1031,188 +800,1215 @@ class TradingHandler(BaseDBHandler):
                 
                 results = cursor.fetchall()
                 
-                # Convert to list of dicts for easier processing
-                timeframeRecords = []
-                for row in results:
-                    timeframeRecords.append({
-                        TradingHandlerConstants.TimeframeMetadata.TIMEFRAME_ID   : row[TradingHandlerConstants.TimeframeMetadata.TIMEFRAME_ID],
-                        TradingHandlerConstants.TimeframeMetadata.TOKEN_ADDRESS: row[TradingHandlerConstants.TimeframeMetadata.TOKEN_ADDRESS],
-                        TradingHandlerConstants.TimeframeMetadata.PAIR_ADDRESS: row[TradingHandlerConstants.TimeframeMetadata.PAIR_ADDRESS], 
-                        TradingHandlerConstants.TimeframeMetadata.TIMEFRAME: row[TradingHandlerConstants.TimeframeMetadata.TIMEFRAME],
-                        TradingHandlerConstants.TimeframeMetadata.NEXT_FETCH_AT: row[TradingHandlerConstants.TimeframeMetadata.NEXT_FETCH_AT],
-                        TradingHandlerConstants.TimeframeMetadata.LAST_FETCHED_AT: row[TradingHandlerConstants.TimeframeMetadata.LAST_FETCHED_AT],
-                        TradingHandlerConstants.TrackedTokens.SYMBOL: row[TradingHandlerConstants.TrackedTokens.SYMBOL],
-                        TradingHandlerConstants.TrackedTokens.NAME: row[TradingHandlerConstants.TrackedTokens.NAME],
-                        TradingHandlerConstants.TrackedTokens.PAIR_CREATED_TIME: row[TradingHandlerConstants.TrackedTokens.PAIR_CREATED_TIME],
-                        TradingHandlerConstants.TimeframeMetadata.CREATED_AT: row[TradingHandlerConstants.TimeframeMetadata.CREATED_AT],
-                        TradingHandlerConstants.TrackedTokens.TRACKED_TOKEN_ID: row[TradingHandlerConstants.TrackedTokens.TRACKED_TOKEN_ID]
-                    })
+                # Convert directly to TrackedToken POJOs
+                from api.trading.request import TrackedToken, TimeframeRecord
                 
-                logger.info(f"Found {len(timeframeRecords)} timeframe records ready for fetching")
-                return timeframeRecords
+                trackedTokensMap = {}
+                
+                for row in results:
+                    tokenAddress = row[TradingHandlerConstants.TimeframeMetadata.TOKEN_ADDRESS]
+                    
+                    # Create or get existing TrackedToken
+                    if tokenAddress not in trackedTokensMap:
+                        trackedTokensMap[tokenAddress] = TrackedToken(
+                            trackedTokenId=row[TradingHandlerConstants.TrackedTokens.TRACKED_TOKEN_ID],
+                            tokenAddress=tokenAddress,
+                            symbol=row[TradingHandlerConstants.TrackedTokens.SYMBOL],
+                            name=row[TradingHandlerConstants.TrackedTokens.NAME],
+                            pairAddress=row[TradingHandlerConstants.TimeframeMetadata.PAIR_ADDRESS],
+                            pairCreatedTime=row[TradingHandlerConstants.TrackedTokens.PAIR_CREATED_TIME],
+                            addedBy='scheduler'
+                        )
+                    
+                    # Create TimeframeRecord POJO
+                    timeframeRecord = TimeframeRecord(
+                        timeframeId=row[TradingHandlerConstants.TimeframeMetadata.TIMEFRAME_ID],
+                        tokenAddress=tokenAddress,
+                        pairAddress=row[TradingHandlerConstants.TimeframeMetadata.PAIR_ADDRESS],
+                        timeframe=row[TradingHandlerConstants.TimeframeMetadata.TIMEFRAME],
+                        nextFetchAt=row[TradingHandlerConstants.TimeframeMetadata.NEXT_FETCH_AT],
+                        lastFetchedAt=row[TradingHandlerConstants.TimeframeMetadata.LAST_FETCHED_AT],
+                        isActive=True
+                    )
+                    
+                    # Add to tracked token
+                    trackedTokensMap[tokenAddress].addTimeframeRecord(timeframeRecord)
+                
+                trackedTokens = list(trackedTokensMap.values())
+                logger.info(f"Found {len(trackedTokens)} tracked tokens with {sum(len(t.timeframeRecords) for t in trackedTokens)} timeframe records ready for fetching")
+                return trackedTokens
                 
         except Exception as e:
             logger.error(f"Error getting timeframe records ready for fetching: {e}")
             return []
 
-    def recordVwapCandleUpdateAndVwapSessionUpdateFromAPI(self, tokenAddress: str, pairAddress: str, calcuatedVwapData: List[Dict]) -> Dict:
-        """
-        API FLOW DATABASE OPERATION: Execute all VWAP operations (candle updates + session creation) in single SQL transaction
-        Properly updates individual candles with their corresponding VWAP values instead of using final VWAP for all candles
-        """
+
+    def batchPersistOptimizedTokenData(self, timeframeRecords: List, maxCandlesPerTimeframe: int = None) -> int:
+        
         try:
+            totalCandlesInserted = 0
+            
             with self.conn_manager.transaction() as cursor:
-                # Prepare all VWAP updates in single batch
-                vwapCandleUpdateData = []
-                vwapSessionUpdateData = []
+                # Collect all data for batch operations
+                timeframeMetadataData = []
+                candleData = []
+                vwapSessionData = []
+                emaStateData = []
+                avwapStateData = []
                 
-                for vwapData in calcuatedVwapData:
-                    timeframe = vwapData[TradingHandlerConstants.TimeframeMetadata.TIMEFRAME]
-                    calculatedVwap = vwapData[TradingHandlerConstants.VWAPSessions.CURRENT_VWAP]
-                    nextFetchAtTime = vwapData[TradingHandlerConstants.VWAPSessions.NEXT_CANDLE_FETCH]
-                    dayStart = vwapData[TradingHandlerConstants.VWAPSessions.SESSION_START_UNIX]
-                    dayEnd = vwapData[TradingHandlerConstants.VWAPSessions.SESSION_END_UNIX]  # Use pre-calculated dayEnd
+                for timeframeRecord in timeframeRecords:
+                    # Collect timeframe metadata
+                    timeframeMetadataData.append((
+                        timeframeRecord.tokenAddress,
+                        timeframeRecord.pairAddress,
+                        timeframeRecord.timeframe,
+                        timeframeRecord.lastFetchedAt,
+                        timeframeRecord.nextFetchAt
+                    ))
                     
-                    # FIXED: Update each candle with its corresponding VWAP value instead of final VWAP for all
-                    for candleVWAP in calculatedVwap[IndicatorConstants.VWAPSessions.CANDLE_VWAPS]:
-                        vwapCandleUpdateData.append((
-                            float(candleVWAP[TradingHandlerConstants.OHLCVDetails.VWAP_VALUE]),  # Use individual candle VWAP
-                            tokenAddress,
-                            pairAddress,
-                            timeframe,
-                            candleVWAP[TradingHandlerConstants.OHLCVDetails.UNIX_TIME]
+                    # Get candles for persistence using TimeframeRecord method
+                    candlesToPersist = timeframeRecord.getCandlesForPersistence(maxCandlesPerTimeframe)
+                    
+                    for candle in candlesToPersist:
+                        candleData.append((
+                            timeframeRecord.timeframeId,  # Add timeframeid
+                            timeframeRecord.tokenAddress,
+                            timeframeRecord.pairAddress,
+                            timeframeRecord.timeframe,
+                            candle.unixTime,
+                            self._calculateTimeBucket(candle.unixTime, timeframeRecord.timeframe),
+                            candle.openPrice,
+                            candle.highPrice,
+                            candle.lowPrice,
+                            candle.closePrice,
+                            candle.volume,
+                            candle.trades,
+                            candle.vwapValue,
+                            candle.avwapValue,
+                            candle.ema12Value,
+                            candle.ema21Value,
+                            candle.ema34Value,
+                            candle.trend,
+                            candle.status,
+                            candle.trend12,
+                            candle.status12,
+                            candle.isComplete,
+                            candle.dataSource
+                        ))
+                        totalCandlesInserted += 1
+                    
+                    # Collect VWAP session data
+                    if timeframeRecord.vwapSession:
+                        vwapSessionData.append((
+                            timeframeRecord.vwapSession.tokenAddress,
+                            timeframeRecord.vwapSession.pairAddress,
+                            timeframeRecord.vwapSession.timeframe,
+                            timeframeRecord.vwapSession.sessionStartUnix,
+                            timeframeRecord.vwapSession.sessionEndUnix,
+                            timeframeRecord.vwapSession.cumulativePV,
+                            timeframeRecord.vwapSession.cumulativeVolume,
+                            timeframeRecord.vwapSession.currentVWAP,
+                            timeframeRecord.vwapSession.lastCandleUnix,
+                            timeframeRecord.vwapSession.nextCandleFetch
                         ))
                     
-                    # Collect VWAP session data for batch execution using pre-calculated dayEnd
-                    vwapSessionUpdateData.append((
-                        tokenAddress, pairAddress, timeframe, dayStart, dayEnd,
-                        float(calculatedVwap.get(TradingHandlerConstants.VWAPSessions.CUMULATIVE_PV, 0)), 
-                        float(calculatedVwap.get(TradingHandlerConstants.VWAPSessions.CUMULATIVE_VOLUME, 0)),
-                        float(calculatedVwap.get(TradingHandlerConstants.VWAPSessions.CURRENT_VWAP, 0)), 
-                        calculatedVwap.get(TradingHandlerConstants.VWAPSessions.LAST_CANDLE_UNIX),
-                        nextFetchAtTime
-                    ))
+                    # Collect EMA state data
+                    if timeframeRecord.ema12State:
+                        emaStateData.append((
+                            timeframeRecord.ema12State.tokenAddress,
+                            timeframeRecord.ema12State.pairAddress,
+                            timeframeRecord.ema12State.timeframe,
+                            timeframeRecord.ema12State.emaKey,
+                            timeframeRecord.ema12State.emaValue,
+                            timeframeRecord.ema12State.lastUpdatedUnix,
+                            timeframeRecord.ema12State.nextFetchTime,
+                            timeframeRecord.ema12State.emaAvailableTime,
+                            timeframeRecord.ema12State.pairCreatedTime,
+                            timeframeRecord.ema12State.status
+                        ))
+
+                    if timeframeRecord.ema21State:
+                        emaStateData.append((
+                            timeframeRecord.ema21State.tokenAddress,
+                            timeframeRecord.ema21State.pairAddress,
+                            timeframeRecord.ema21State.timeframe,
+                            timeframeRecord.ema21State.emaKey,
+                            timeframeRecord.ema21State.emaValue,
+                            timeframeRecord.ema21State.lastUpdatedUnix,
+                            timeframeRecord.ema21State.nextFetchTime,
+                            timeframeRecord.ema21State.emaAvailableTime,
+                            timeframeRecord.ema21State.pairCreatedTime,
+                            timeframeRecord.ema21State.status
+                        ))
+                    
+                    if timeframeRecord.ema34State:
+                        emaStateData.append((
+                            timeframeRecord.ema34State.tokenAddress,
+                            timeframeRecord.ema34State.pairAddress,
+                            timeframeRecord.ema34State.timeframe,
+                            timeframeRecord.ema34State.emaKey,
+                            timeframeRecord.ema34State.emaValue,
+                            timeframeRecord.ema34State.lastUpdatedUnix,
+                            timeframeRecord.ema34State.nextFetchTime,
+                            timeframeRecord.ema34State.emaAvailableTime,
+                            timeframeRecord.ema34State.pairCreatedTime,
+                            timeframeRecord.ema34State.status
+                        ))
+                    
+                    # Collect AVWAP state data
+                    if timeframeRecord.avwapState:
+                        avwapStateData.append((
+                            timeframeRecord.avwapState.tokenAddress,
+                            timeframeRecord.avwapState.pairAddress,
+                            timeframeRecord.avwapState.timeframe,
+                            timeframeRecord.avwapState.avwap,
+                            timeframeRecord.avwapState.cumulativePV,
+                            timeframeRecord.avwapState.cumulativeVolume,
+                            timeframeRecord.avwapState.lastUpdatedUnix,
+                            timeframeRecord.avwapState.nextFetchTime
+                        ))
                 
-                # Single batch update for all VWAP values across all timeframes
-                if vwapCandleUpdateData:
+                # Execute all batch operations
+                if timeframeMetadataData:
+                    self._batchUpdateTimeframeMetadata(cursor, timeframeMetadataData)
+                
+                if candleData:
+                    self._batchInsertCandles(cursor, candleData)
+                
+                if vwapSessionData:
+                    self._batchInsertVWAPSessions(cursor, vwapSessionData)
+                
+                if emaStateData:
+                    self._batchInsertEMAStates(cursor, emaStateData)
+                
+                if avwapStateData:
+                    self._batchInsertAVWAPStates(cursor, avwapStateData)
+            
+            logger.info(f"Batch persisted {totalCandlesInserted} candles and all indicator data in single transaction")
+            return totalCandlesInserted
+            
+        except Exception as e:
+            logger.error(f"Error in batch persist optimized token data: {e}")
+            return 0
+
+    def batchPersistTrackedTokensData(self, trackedTokens: List['TrackedToken'], maxCandlesPerTimeframe: int = None) -> int:
+        
+        try:
+            totalCandlesInserted = 0
+            
+            with self.conn_manager.transaction() as cursor:
+                # Collect all data for batch operations
+                timeframeMetadataData = []
+                candleData = []
+                vwapSessionData = []
+                emaStateData = []
+                avwapStateData = []
+                
+                for trackedToken in trackedTokens:
+                    for timeframeRecord in trackedToken.timeframeRecords:
+                        # Collect timeframe metadata
+                        timeframeMetadataData.append((
+                            timeframeRecord.tokenAddress,
+                            timeframeRecord.pairAddress,
+                            timeframeRecord.timeframe,
+                            timeframeRecord.lastFetchedAt,
+                            timeframeRecord.nextFetchAt
+                        ))
+                        
+                        # Get candles for persistence using TimeframeRecord method
+                        candlesToPersist = timeframeRecord.getCandlesForPersistence(maxCandlesPerTimeframe)
+                        
+                        for candle in candlesToPersist:
+                            candleData.append((
+                                timeframeRecord.timeframeId,  # Add timeframeid
+                                timeframeRecord.tokenAddress,
+                                timeframeRecord.pairAddress,
+                                timeframeRecord.timeframe,
+                                candle.unixTime,
+                                self._calculateTimeBucket(candle.unixTime, timeframeRecord.timeframe),
+                                candle.openPrice,
+                                candle.highPrice,
+                                candle.lowPrice,
+                                candle.closePrice,
+                                candle.volume,
+                                candle.trades,
+                                candle.vwapValue,
+                                candle.avwapValue,
+                                candle.ema12Value,
+                                candle.ema21Value,
+                                candle.ema34Value,
+                                candle.trend,
+                                candle.status,
+                                candle.trend12,
+                                candle.status12,
+                                candle.isComplete,
+                                candle.dataSource
+                            ))
+                            totalCandlesInserted += 1
+                        
+                        # Collect VWAP session data
+                        if timeframeRecord.vwapSession:
+                            vwapSessionData.append((
+                                timeframeRecord.vwapSession.tokenAddress,
+                                timeframeRecord.vwapSession.pairAddress,
+                                timeframeRecord.vwapSession.timeframe,
+                                timeframeRecord.vwapSession.sessionStartUnix,
+                                timeframeRecord.vwapSession.sessionEndUnix,
+                                timeframeRecord.vwapSession.cumulativePV,
+                                timeframeRecord.vwapSession.cumulativeVolume,
+                                timeframeRecord.vwapSession.currentVWAP,
+                                timeframeRecord.vwapSession.lastCandleUnix,
+                                timeframeRecord.vwapSession.nextCandleFetch
+                            ))
+                        
+                        if timeframeRecord.ema12State:
+                            emaStateData.append((
+                                timeframeRecord.ema12State.tokenAddress,
+                                timeframeRecord.ema12State.pairAddress,
+                                timeframeRecord.ema12State.timeframe,
+                                timeframeRecord.ema12State.emaKey,
+                                timeframeRecord.ema12State.emaValue,
+                                timeframeRecord.ema12State.lastUpdatedUnix,
+                                timeframeRecord.ema12State.nextFetchTime,
+                                timeframeRecord.ema12State.emaAvailableTime,
+                                timeframeRecord.ema12State.pairCreatedTime,
+                                timeframeRecord.ema12State.status
+                            ))
+
+                        # Collect EMA state data
+                        if timeframeRecord.ema21State:
+                            emaStateData.append((
+                                timeframeRecord.ema21State.tokenAddress,
+                                timeframeRecord.ema21State.pairAddress,
+                                timeframeRecord.ema21State.timeframe,
+                                timeframeRecord.ema21State.emaKey,
+                                timeframeRecord.ema21State.emaValue,
+                                timeframeRecord.ema21State.lastUpdatedUnix,
+                                timeframeRecord.ema21State.nextFetchTime,
+                                timeframeRecord.ema21State.emaAvailableTime,
+                                timeframeRecord.ema21State.pairCreatedTime,
+                                timeframeRecord.ema21State.status
+                            ))
+                        
+                        if timeframeRecord.ema34State:
+                            emaStateData.append((
+                                timeframeRecord.ema34State.tokenAddress,
+                                timeframeRecord.ema34State.pairAddress,
+                                timeframeRecord.ema34State.timeframe,
+                                timeframeRecord.ema34State.emaKey,
+                                timeframeRecord.ema34State.emaValue,
+                                timeframeRecord.ema34State.lastUpdatedUnix,
+                                timeframeRecord.ema34State.nextFetchTime,
+                                timeframeRecord.ema34State.emaAvailableTime,
+                                timeframeRecord.ema34State.pairCreatedTime,
+                                timeframeRecord.ema34State.status
+                            ))
+                        
+                        # Collect AVWAP state data
+                        if timeframeRecord.avwapState:
+                            avwapStateData.append((
+                                timeframeRecord.avwapState.tokenAddress,
+                                timeframeRecord.avwapState.pairAddress,
+                                timeframeRecord.avwapState.timeframe,
+                                timeframeRecord.avwapState.avwap,
+                                timeframeRecord.avwapState.cumulativePV,
+                                timeframeRecord.avwapState.cumulativeVolume,
+                                timeframeRecord.avwapState.lastUpdatedUnix,
+                                timeframeRecord.avwapState.nextFetchTime
+                            ))
+                
+                # Execute all batch operations
+                if timeframeMetadataData:
+                    self._batchUpdateTimeframeMetadata(cursor, timeframeMetadataData)
+                
+                if candleData:
+                    self._batchInsertCandles(cursor, candleData)
+                
+                if vwapSessionData:
+                    self._batchInsertVWAPSessions(cursor, vwapSessionData)
+                
+                if emaStateData:
+                    self._batchInsertEMAStates(cursor, emaStateData)
+                
+                if avwapStateData:
+                    self._batchInsertAVWAPStates(cursor, avwapStateData)
+            
+            return totalCandlesInserted
+            
+        except Exception as e:
+            logger.error(f"Error in batch persist tracked tokens data: {e}")
+            return 0
+
+    def batchPersistEMAData(self, trackedTokens: List['TrackedToken']) -> int:
+        try:
+            totalEMAStatesUpdated = 0
+            
+            with self.conn_manager.transaction() as cursor:
+                emaStateData = []
+                ema12CandleUpdates = []
+                ema21CandleUpdates = []
+                ema34CandleUpdates = []
+                
+                for trackedToken in trackedTokens:
+                    for timeframeRecord in trackedToken.timeframeRecords:
+                        # Collect EMA12 state data
+                        if timeframeRecord.ema12State:
+                            emaStateData.append((
+                                timeframeRecord.ema12State.tokenAddress,
+                                timeframeRecord.ema12State.pairAddress,
+                                timeframeRecord.ema12State.timeframe,
+                                timeframeRecord.ema12State.emaKey,
+                                timeframeRecord.ema12State.emaValue,
+                                timeframeRecord.ema12State.lastUpdatedUnix,
+                                timeframeRecord.ema12State.nextFetchTime,
+                                timeframeRecord.ema12State.emaAvailableTime,
+                                timeframeRecord.ema12State.pairCreatedTime,
+                                timeframeRecord.ema12State.status
+                            ))
+                            totalEMAStatesUpdated += 1
+                            
+                            # Collect EMA12 candle updates
+                            for candle in timeframeRecord.ohlcvDetails:
+                                if candle.ema12Value is not None:
+                                    ema12CandleUpdates.append((
+                                        candle.ema12Value,
+                                        candle.tokenAddress,
+                                        candle.timeframe,
+                                        candle.unixTime
+                                    ))
+                        
+                        # Collect EMA21 state data
+                        if timeframeRecord.ema21State:
+                            emaStateData.append((
+                                timeframeRecord.ema21State.tokenAddress,
+                                timeframeRecord.ema21State.pairAddress,
+                                timeframeRecord.ema21State.timeframe,
+                                timeframeRecord.ema21State.emaKey,
+                                timeframeRecord.ema21State.emaValue,
+                                timeframeRecord.ema21State.lastUpdatedUnix,
+                                timeframeRecord.ema21State.nextFetchTime,
+                                timeframeRecord.ema21State.emaAvailableTime,
+                                timeframeRecord.ema21State.pairCreatedTime,
+                                timeframeRecord.ema21State.status
+                            ))
+                            totalEMAStatesUpdated += 1
+                            
+                            # Collect EMA21 candle updates
+                            for candle in timeframeRecord.ohlcvDetails:
+                                if candle.ema21Value is not None:
+                                    ema21CandleUpdates.append((
+                                        candle.ema21Value,
+                                        candle.tokenAddress,
+                                        candle.timeframe,
+                                        candle.unixTime
+                                    ))
+                        
+                        # Collect EMA34 state data
+                        if timeframeRecord.ema34State:
+                            emaStateData.append((
+                                timeframeRecord.ema34State.tokenAddress,
+                                timeframeRecord.ema34State.pairAddress,
+                                timeframeRecord.ema34State.timeframe,
+                                timeframeRecord.ema34State.emaKey,
+                                timeframeRecord.ema34State.emaValue,
+                                timeframeRecord.ema34State.lastUpdatedUnix,
+                                timeframeRecord.ema34State.nextFetchTime,
+                                timeframeRecord.ema34State.emaAvailableTime,
+                                timeframeRecord.ema34State.pairCreatedTime,
+                                timeframeRecord.ema34State.status
+                            ))
+                            totalEMAStatesUpdated += 1
+                            
+                            # Collect EMA34 candle updates
+                            for candle in timeframeRecord.ohlcvDetails:
+                                if candle.ema34Value is not None:
+                                    ema34CandleUpdates.append((
+                                        candle.ema34Value,
+                                        candle.tokenAddress,
+                                        candle.timeframe,
+                                        candle.unixTime
+                                    ))
+                
+                # Execute EMA-specific batch operations
+                if emaStateData:
+                    self._batchInsertEMAStates(cursor, emaStateData)
+                
+                # Update EMA12 values
+                if ema12CandleUpdates:
+                    cursor.executemany("""
+                        UPDATE ohlcvdetails 
+                        SET ema12value = %s
+                        WHERE tokenaddress = %s AND timeframe = %s AND unixtime = %s
+                    """, ema12CandleUpdates)
+                    logger.info(f"Batch updated {len(ema12CandleUpdates)} EMA12 candle values")
+                
+                # Update EMA21 values
+                if ema21CandleUpdates:
+                    cursor.executemany("""
+                        UPDATE ohlcvdetails 
+                        SET ema21value = %s
+                        WHERE tokenaddress = %s AND timeframe = %s AND unixtime = %s
+                    """, ema21CandleUpdates)
+                    logger.info(f"Batch updated {len(ema21CandleUpdates)} EMA21 candle values")
+                
+                # Update EMA34 values
+                if ema34CandleUpdates:
+                    cursor.executemany("""
+                        UPDATE ohlcvdetails 
+                        SET ema34value = %s
+                        WHERE tokenaddress = %s AND timeframe = %s AND unixtime = %s
+                    """, ema34CandleUpdates)
+                    logger.info(f"Batch updated {len(ema34CandleUpdates)} EMA34 candle values")
+                        
+                
+            return totalEMAStatesUpdated
+            
+        except Exception as e:
+            logger.error(f"Error in batch persist EMA data: {e}")
+            return 0
+
+    def batchPersistVWAPData(self, trackedTokens: List['TrackedToken']) -> int:
+       
+        try:
+            totalVWAPSessionsUpdated = 0
+            
+            with self.conn_manager.transaction() as cursor:
+                # Collect VWAP-specific data for batch operations
+                vwapSessionData = []
+                vwapCandleUpdates = []
+                
+                for trackedToken in trackedTokens:
+                    for timeframeRecord in trackedToken.timeframeRecords:
+                        # Collect VWAP session data
+                        if timeframeRecord.vwapSession:
+                            vwapSessionData.append((
+                                timeframeRecord.vwapSession.tokenAddress,
+                                timeframeRecord.vwapSession.pairAddress,
+                                timeframeRecord.vwapSession.timeframe,
+                                timeframeRecord.vwapSession.sessionStartUnix,
+                                timeframeRecord.vwapSession.sessionEndUnix,
+                                timeframeRecord.vwapSession.cumulativePV,
+                                timeframeRecord.vwapSession.cumulativeVolume,
+                                timeframeRecord.vwapSession.currentVWAP,
+                                timeframeRecord.vwapSession.lastCandleUnix,
+                                timeframeRecord.vwapSession.nextCandleFetch
+                            ))
+                            totalVWAPSessionsUpdated += 1
+                            
+                            # Collect VWAP candle updates
+                            for candle in timeframeRecord.ohlcvDetails:
+                                if candle.vwapValue is not None:
+                                    vwapCandleUpdates.append((
+                                        candle.vwapValue,
+                                        candle.tokenAddress,
+                                        candle.timeframe,
+                                        candle.unixTime
+                                    ))
+                
+                # Execute VWAP-specific batch operations
+                if vwapSessionData:
+                    self._batchInsertVWAPSessions(cursor, vwapSessionData)
+                
+                if vwapCandleUpdates:
                     cursor.executemany("""
                         UPDATE ohlcvdetails 
                         SET vwapvalue = %s
-                        WHERE tokenaddress = %s AND pairaddress = %s AND timeframe = %s AND unixtime = %s
-                    """, vwapCandleUpdateData)
+                        WHERE tokenaddress = %s AND timeframe = %s AND unixtime = %s
+                    """, vwapCandleUpdates)
+                    logger.info(f"Batch updated {len(vwapCandleUpdates)} VWAP candle values")
                 
-                # Single batch insert/update for all VWAP sessions across all timeframes
-                if vwapSessionUpdateData:
-                    cursor.executemany("""
-                        INSERT INTO vwapsessions 
-                        (tokenaddress, pairaddress, timeframe, sessionstartunix, sessionendunix,
-                         cumulativepv, cumulativevolume, currentvwap, lastcandleunix, nextcandlefetch)
-                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-                        ON CONFLICT (tokenaddress, timeframe) 
-                        DO UPDATE SET 
-                            sessionstartunix = EXCLUDED.sessionstartunix,
-                            sessionendunix = EXCLUDED.sessionendunix,
-                            cumulativepv = EXCLUDED.cumulativepv,
-                            cumulativevolume = EXCLUDED.cumulativevolume,
-                            currentvwap = EXCLUDED.currentvwap,
-                            lastcandleunix = EXCLUDED.lastcandleunix,
-                            nextcandlefetch = EXCLUDED.nextcandlefetch,
-                            lastupdatedat = NOW()
-                    """, vwapSessionUpdateData)
-                
-                logger.info(f"API VWAP operations completed: {len(vwapCandleUpdateData)} candle updates with individual VWAP values, {len(vwapSessionUpdateData)} session updates")
-                return {'success': True}
+                logger.info(f"Batch persisted {totalVWAPSessionsUpdated} VWAP sessions and {len(vwapCandleUpdates)} candle VWAP values")
+                return totalVWAPSessionsUpdated
                 
         except Exception as e:
-            logger.error(f"Error in API VWAP operations: {e}")
-            return {'success': False, 'error': str(e)}
+            logger.error(f"Error in batch persist VWAP data: {e}")
+            return 0
 
-    def updateEMA(self, emaStateUpdatedData: List[Dict], emaCandleUpdatedData: List[Dict]):
+    def getAllAVWAPDataForScheduler(self) -> List['TrackedToken']:
         """
-        API FLOW HELPER: Execute all EMA operations (state creation + candle updates) in single transaction
-        Optimized batch operation for API flow's initial EMA state and value creation
+        SINGLE OPTIMIZED QUERY: Get all AVWAP data with corresponding candles for scheduler
+        
+        This method implements the new optimized approach:
+        1. JOIN avwapstates with trackedtokens to get only active tokens
+        2. JOIN with timeframemetadata to get lastfetchedat for each timeframe
+        3. JOIN with ohlcvdetails to get candles where unixtime > lastupdatedunix
+        4. All in one highly optimized query for scalability
+        
+        Returns:
+            List[TrackedToken]: List of tracked tokens with AVWAP data and candles
+        """
+        try:        
+            with self.conn_manager.transaction() as cursor:
+                # Single optimized query with JOINs for AVWAP data
+                cursor.execute(text("""
+                    WITH avwap_data AS (
+                        SELECT 
+                            avs.tokenaddress,
+                            avs.pairaddress,
+                            avs.timeframe,
+                            avs.avwap,
+                            avs.cumulativepv,
+                            avs.cumulativevolume,
+                            avs.lastupdatedunix,
+                            avs.nextfetchtime,
+                            tmf.id as timeframeid,
+                            tmf.lastfetchedat,
+                            CASE 
+                                WHEN avs.lastupdatedunix IS NOT NULL THEN avs.lastupdatedunix  -- Get candles after last updated
+                                ELSE 0  -- Get all candles if no previous update
+                            END as candle_from_time
+                        FROM avwapstates avs
+                        INNER JOIN trackedtokens tt ON avs.tokenaddress = tt.tokenaddress AND avs.pairaddress = tt.pairaddress
+                        INNER JOIN timeframemetadata tmf ON avs.tokenaddress = tmf.tokenaddress AND avs.timeframe = tmf.timeframe
+                        WHERE tt.status = 1
+                          AND tmf.isactive = TRUE
+                    ),
+                    candle_data AS (
+                        SELECT 
+                            ad.tokenaddress,
+                            ad.pairaddress,
+                            ad.timeframe,
+                            o.unixtime,
+                            o.timebucket,
+                            o.openprice,
+                            o.highprice,
+                            o.lowprice,
+                            o.closeprice,
+                            o.volume,
+                            o.trades,
+                            o.iscomplete,
+                            o.datasource
+                        FROM avwap_data ad
+                        INNER JOIN ohlcvdetails o ON ad.tokenaddress = o.tokenaddress AND ad.timeframe = o.timeframe
+                        WHERE o.unixtime > ad.candle_from_time
+                          AND o.iscomplete = TRUE
+                    )
+                    SELECT 
+                        ad.tokenaddress,
+                        ad.pairaddress,
+                        ad.timeframe,
+                        ad.timeframeid,
+                        ad.avwap,
+                        ad.cumulativepv,
+                        ad.cumulativevolume,
+                        ad.lastupdatedunix,
+                        ad.nextfetchtime,
+                        ad.lastfetchedat,
+                        cd.unixtime as candle_unixtime,
+                        cd.timebucket as candle_timebucket,
+                        cd.openprice as candle_openprice,
+                        cd.highprice as candle_highprice,
+                        cd.lowprice as candle_lowprice,
+                        cd.closeprice as candle_closeprice,
+                        cd.volume as candle_volume,
+                        cd.trades as candle_trades,
+                        cd.iscomplete as candle_iscomplete,
+                        cd.datasource as candle_datasource
+                    FROM avwap_data ad
+                    LEFT JOIN candle_data cd ON ad.tokenaddress = cd.tokenaddress 
+                        AND ad.timeframe = cd.timeframe
+                    ORDER BY ad.tokenaddress, ad.timeframe, cd.unixtime ASC
+                """))
+                
+                # Organize results into POJOs
+                trackedTokens = {}
+                # Track seen candle timestamps per timeframe to prevent duplicates (space and time efficient)
+                seenCandles = {}  # {tokenAddress: {timeframe: set(unixTimes)}}
+                
+                for row in cursor.fetchall():
+                    tokenAddress = row['tokenaddress']
+                    pairAddress = row['pairaddress']
+                    timeframe = row['timeframe']
+                    timeframeId = row['timeframeid']
+                    
+                    # Initialize TrackedToken if not exists
+                    if tokenAddress not in trackedTokens:
+                        trackedTokens[tokenAddress] = TrackedToken(
+                            trackedTokenId=0,  # Will be set from database if needed
+                            tokenAddress=tokenAddress,
+                            symbol='',  # Not needed for AVWAP processing
+                            name='',    # Not needed for AVWAP processing
+                            pairAddress=pairAddress,
+                            addedBy='scheduler'
+                        )
+                    
+                    # Get or create TimeframeRecord for this timeframe
+                    timeframeRecord = trackedTokens[tokenAddress].getTimeframeRecord(timeframe)
+                    if not timeframeRecord:
+                        timeframeRecord = TimeframeRecord(
+                            timeframeId=timeframeId,
+                            tokenAddress=tokenAddress,
+                            pairAddress=pairAddress,
+                            timeframe=timeframe,
+                            nextFetchAt=row['lastfetchedat'] or 0,
+                            lastFetchedAt=row['lastfetchedat'],
+                            isActive=True
+                        )
+                        trackedTokens[tokenAddress].addTimeframeRecord(timeframeRecord)
+                    
+                    # Create or update AVWAPState
+                    avwapState = AVWAPState(
+                        tokenAddress=tokenAddress,
+                        pairAddress=pairAddress,
+                        timeframe=timeframe,
+                        avwap=float(row['avwap']) if row['avwap'] else None,
+                        cumulativePV=float(row['cumulativepv']) if row['cumulativepv'] else None,
+                        cumulativeVolume=float(row['cumulativevolume']) if row['cumulativevolume'] else None,
+                        lastUpdatedUnix=row['lastupdatedunix'],
+                        nextFetchTime=row['nextfetchtime']
+                    )
+                    
+                    # Set AVWAPState in TimeframeRecord
+                    timeframeRecord.avwapState = avwapState
+                    
+                    # Add candle data if exists
+                    if row['candle_unixtime']:
+                        candleUnixTime = row['candle_unixtime']
+                        
+                        # Initialize seenCandles structure if needed
+                        if tokenAddress not in seenCandles:
+                            seenCandles[tokenAddress] = {}
+                        if timeframe not in seenCandles[tokenAddress]:
+                            seenCandles[tokenAddress][timeframe] = set()
+                        
+                        # O(1) check if candle already exists using set
+                        if candleUnixTime not in seenCandles[tokenAddress][timeframe]:
+                            # Mark as seen
+                            seenCandles[tokenAddress][timeframe].add(candleUnixTime)
+                            
+                            # Create OHLCVDetails with all candle data (AVWAP needs full OHLCV data)
+                            candle = OHLCVDetails(
+                                tokenAddress=tokenAddress,
+                                pairAddress=pairAddress,
+                                timeframe=timeframe,
+                                unixTime=candleUnixTime,
+                                timeBucket=row['candle_timebucket'],
+                                openPrice=float(row['candle_openprice']),
+                                highPrice=float(row['candle_highprice']),
+                                lowPrice=float(row['candle_lowprice']),
+                                closePrice=float(row['candle_closeprice']),
+                                volume=float(row['candle_volume']),
+                                trades=row['candle_trades'],
+                                isComplete=row['candle_iscomplete'],
+                                dataSource=row['candle_datasource']
+                            )
+                            timeframeRecord.addOHLCVDetail(candle)
+                
+                return list(trackedTokens.values())
+                
+        except Exception as e:
+            logger.error(f"Error getting AVWAP data with candles for scheduler: {e}")
+            return []
+
+    def batchPersistAVWAPData(self, trackedTokens: List['TrackedToken']) -> int:
+        """
+        OPTIMIZED: Batch persist only AVWAP data (AVWAP states + candle AVWAP values)
+        
+        Args:
+            trackedTokens: List of TrackedToken POJOs with AVWAP data
+            
+        Returns:
+            int: Number of AVWAP states updated
+        """
+        try:
+            totalAVWAPStatesUpdated = 0
+            
+            with self.conn_manager.transaction() as cursor:
+                # Collect AVWAP-specific data for batch operations
+                avwapStateData = []
+                avwapCandleUpdates = []
+                
+                for trackedToken in trackedTokens:
+                    for timeframeRecord in trackedToken.timeframeRecords:
+                        # Collect AVWAP state data
+                        if timeframeRecord.avwapState:
+                            avwapStateData.append((
+                                timeframeRecord.avwapState.tokenAddress,
+                                timeframeRecord.avwapState.pairAddress,
+                                timeframeRecord.avwapState.timeframe,
+                                timeframeRecord.avwapState.avwap,
+                                timeframeRecord.avwapState.cumulativePV,
+                                timeframeRecord.avwapState.cumulativeVolume,
+                                timeframeRecord.avwapState.lastUpdatedUnix,
+                                timeframeRecord.avwapState.nextFetchTime
+                            ))
+                            totalAVWAPStatesUpdated += 1
+                            
+                            # Collect AVWAP candle updates
+                            for candle in timeframeRecord.ohlcvDetails:
+                                if candle.avwapValue is not None:
+                                    avwapCandleUpdates.append((
+                                        candle.avwapValue,
+                                        candle.tokenAddress,
+                                        candle.timeframe,
+                                        candle.unixTime
+                                    ))
+                
+                # Execute AVWAP-specific batch operations
+                if avwapStateData:
+                    self._batchInsertAVWAPStates(cursor, avwapStateData)
+                
+                if avwapCandleUpdates:
+                    cursor.executemany("""
+                        UPDATE ohlcvdetails 
+                        SET avwapvalue = %s
+                        WHERE tokenaddress = %s AND timeframe = %s AND unixtime = %s
+                    """, avwapCandleUpdates)
+                    logger.info(f"Batch updated {len(avwapCandleUpdates)} AVWAP candle values")
+                
+                logger.info(f"Batch persisted {totalAVWAPStatesUpdated} AVWAP states and {len(avwapCandleUpdates)} candle AVWAP values")
+                return totalAVWAPStatesUpdated
+                
+        except Exception as e:
+            logger.error(f"Error in batch persist AVWAP data: {e}")
+            return 0
+
+    def _batchUpdateTimeframeMetadata(self, cursor, timeframeMetadataData: List[Tuple]):
+        """Batch update timeframe metadata"""
+        cursor.executemany("""
+            INSERT INTO timeframemetadata 
+            (tokenaddress, pairaddress, timeframe, lastfetchedat, nextfetchat, createdat, lastupdatedat)
+            VALUES (%s, %s, %s, %s, %s, NOW(), NOW())
+            ON CONFLICT (tokenaddress, pairaddress, timeframe) 
+            DO UPDATE SET 
+                lastfetchedat = EXCLUDED.lastfetchedat,
+                nextfetchat = EXCLUDED.nextfetchat,
+                lastupdatedat = NOW()
+        """, timeframeMetadataData)
+
+    def _batchInsertCandles(self, cursor, candleData: List[Tuple]):
+        """Batch insert candles with indicator values"""
+        cursor.executemany("""
+            INSERT INTO ohlcvdetails 
+            (timeframeid, tokenaddress, pairaddress, timeframe, unixtime, timebucket, 
+             openprice, highprice, lowprice, closeprice, volume, trades,
+             vwapvalue, avwapvalue, ema12value, ema21value, ema34value, trend, status, trend12, status12, iscomplete, datasource,
+             createdat, lastupdatedat)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, NOW(), NOW())
+            ON CONFLICT (tokenaddress, timeframe, unixtime) 
+            DO UPDATE SET 
+                vwapvalue = EXCLUDED.vwapvalue,
+                avwapvalue = EXCLUDED.avwapvalue,
+                ema12value = EXCLUDED.ema12value,
+                ema21value = EXCLUDED.ema21value,
+                ema34value = EXCLUDED.ema34value,
+                trend = EXCLUDED.trend,
+                status = EXCLUDED.status,
+                trend12 = EXCLUDED.trend12,
+                status12 = EXCLUDED.status12,
+                lastupdatedat = NOW()
+        """, candleData)
+
+    def _batchInsertVWAPSessions(self, cursor, vwapSessionData: List[Tuple]):
+        """Batch insert/update VWAP sessions"""
+        cursor.executemany("""
+            INSERT INTO vwapsessions 
+            (tokenaddress, pairaddress, timeframe, sessionstartunix, sessionendunix,
+             cumulativepv, cumulativevolume, currentvwap, lastcandleunix, nextcandlefetch,
+             createdat, lastupdatedat)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, NOW(), NOW())
+            ON CONFLICT (tokenaddress, timeframe) 
+            DO UPDATE SET 
+                sessionstartunix = EXCLUDED.sessionstartunix,
+                sessionendunix = EXCLUDED.sessionendunix,
+                cumulativepv = EXCLUDED.cumulativepv,
+                cumulativevolume = EXCLUDED.cumulativevolume,
+                currentvwap = EXCLUDED.currentvwap,
+                lastcandleunix = EXCLUDED.lastcandleunix,
+                nextcandlefetch = EXCLUDED.nextcandlefetch,
+                lastupdatedat = NOW()
+        """, vwapSessionData)
+
+    def _batchInsertEMAStates(self, cursor, emaStateData: List[Tuple]):
+        """Batch insert/update EMA states"""
+        cursor.executemany("""
+            INSERT INTO emastates 
+            (tokenaddress, pairaddress, timeframe, emakey, emavalue, 
+             lastupdatedunix, nextfetchtime, emaavailabletime, paircreatedtime, status,
+             createdat, lastupdatedat)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, NOW(), NOW())
+            ON CONFLICT (tokenaddress, timeframe, emakey) 
+            DO UPDATE SET 
+                emavalue = EXCLUDED.emavalue,
+                lastupdatedunix = EXCLUDED.lastupdatedunix,
+                nextfetchtime = EXCLUDED.nextfetchtime,
+                status = EXCLUDED.status,
+                lastupdatedat = NOW()
+        """, emaStateData)
+
+    def _batchInsertAVWAPStates(self, cursor, avwapStateData: List[Tuple]):
+        """Batch insert/update AVWAP states"""
+        cursor.executemany("""
+            INSERT INTO avwapstates 
+            (tokenaddress, pairaddress, timeframe, avwap, cumulativepv, cumulativevolume, 
+             lastupdatedunix, nextfetchtime, createdat, lastupdatedat)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, NOW(), NOW())
+            ON CONFLICT (tokenaddress, timeframe) 
+            DO UPDATE SET 
+                avwap = EXCLUDED.avwap,
+                cumulativepv = EXCLUDED.cumulativepv,
+                cumulativevolume = EXCLUDED.cumulativevolume,
+                lastupdatedunix = EXCLUDED.lastupdatedunix,
+                nextfetchtime = EXCLUDED.nextfetchtime,
+                lastupdatedat = NOW()
+        """, avwapStateData)
+    
+    def createInitialAlerts(self, tokenId: int, tokenAddress: str, pairAddress: str, 
+                           timeframes: List[str]) -> bool:
+        """
+        Create initial alert entries for new token
+        
+        Args:
+            tokenId: Tracked token ID
+            tokenAddress: Token contract address
+            pairAddress: Trading pair address
+            timeframes: List of timeframes
+            
+        Returns:
+            bool: True if successful
         """
         try:
             with self.conn_manager.transaction() as cursor:
-                from sqlalchemy import text
+                alertData = []
+                for timeframe in timeframes:
+                    alertData.append((
+                        tokenId,
+                        tokenAddress,
+                        pairAddress,
+                        timeframe,
+                        'NEUTRAL'  # Initial trend
+                    ))
                 
-                # Batch insert/update EMA states
-                if emaStateUpdatedData:
-                    emaStateUpdateQueryData = []
-                    for emaState in emaStateUpdatedData:
-                        emaStateUpdateQueryData.append((
-                            emaState[TradingHandlerConstants.EMAStates.TOKEN_ADDRESS],
-                            emaState[TradingHandlerConstants.EMAStates.PAIR_ADDRESS],
-                            emaState[TradingHandlerConstants.EMAStates.TIMEFRAME],
-                            emaState[TradingHandlerConstants.EMAStates.EMA_KEY],
-                            emaState[TradingHandlerConstants.EMAStates.EMA_VALUE],
-                            emaState[TradingHandlerConstants.EMAStates.LAST_UPDATED_UNIX],
-                            emaState[TradingHandlerConstants.EMAStates.NEXT_FETCH_TIME],
-                            emaState[TradingHandlerConstants.EMAStates.EMA_AVAILABLE_TIME],
-                            emaState[TradingHandlerConstants.EMAStates.PAIR_CREATED_TIME],
-                            int(emaState[TradingHandlerConstants.EMAStates.STATUS])
-                        ))
-                    
-                    cursor.executemany("""
-                        INSERT INTO emastates 
-                        (tokenaddress, pairaddress, timeframe, emakey, emavalue, 
-                         lastupdatedunix, nextfetchtime, emaavailabletime, paircreatedtime, status)
-                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-                        ON CONFLICT (tokenaddress, timeframe, emakey) 
-                        DO UPDATE SET 
-                            emavalue = EXCLUDED.emavalue,
-                            lastupdatedunix = EXCLUDED.lastupdatedunix,
-                            nextfetchtime = EXCLUDED.nextfetchtime,
-                            status = EXCLUDED.status,
-                            lastupdatedat = NOW()
-                    """, emaStateUpdateQueryData)
-                    
-                    logger.info(f"Batch inserted/updated {len(emaStateUpdateQueryData)} EMA states")
+                cursor.executemany("""
+                    INSERT INTO alerts 
+                    (tokenid, tokenaddress, pairaddress, timeframe, trend, 
+                     touchcount, createdat, lastupdatedat)
+                    VALUES (%s, %s, %s, %s, %s, 0, NOW(), NOW())
+                    ON CONFLICT (tokenaddress, timeframe) DO NOTHING
+                """, alertData)
                 
-                # Batch update EMA values - separate updates for EMA21 and EMA34
-                if emaCandleUpdatedData:
-                    # Separate data by EMA period
-                    ema21Updates = []
-                    ema34Updates = []
-                    
-                    for candle in emaCandleUpdatedData:
-                        if candle[IndicatorConstants.EMAStates.EMA_PERIOD] == IndicatorConstants.EMAStates.EMA_21:
-                            ema21Updates.append((
-                                candle[IndicatorConstants.EMAStates.EMA_VALUE],
-                                candle[TradingHandlerConstants.EMAStates.TOKEN_ADDRESS],
-                                candle[TradingHandlerConstants.EMAStates.TIMEFRAME],
-                                candle[TradingHandlerConstants.OHLCVDetails.UNIX_TIME]
-                            ))
-                        elif candle[IndicatorConstants.EMAStates.EMA_PERIOD] == IndicatorConstants.EMAStates.EMA_34:
-                            ema34Updates.append((
-                                candle[IndicatorConstants.EMAStates.EMA_VALUE],
-                                candle[TradingHandlerConstants.EMAStates.TOKEN_ADDRESS],
-                                candle[TradingHandlerConstants.EMAStates.TIMEFRAME],
-                                candle[TradingHandlerConstants.OHLCVDetails.UNIX_TIME]
-                            ))
-                    
-                    # Update EMA21 values
-                    if ema21Updates:
-                        cursor.executemany("""
-                            UPDATE ohlcvdetails 
-                            SET ema21value = %s
-                            WHERE tokenaddress = %s AND timeframe = %s AND unixtime = %s
-                        """, ema21Updates)
-                        logger.info(f"Batch updated {len(ema21Updates)} EMA21 candle values")
-                    
-                    # Update EMA34 values
-                    if ema34Updates:
-                        cursor.executemany("""
-                            UPDATE ohlcvdetails 
-                            SET ema34value = %s
-                            WHERE tokenaddress = %s AND timeframe = %s AND unixtime = %s
-                        """, ema34Updates)
-                        logger.info(f"Batch updated {len(ema34Updates)} EMA34 candle values")
-                
-                logger.info(f"All EMA operations completed in 2 SQL calls: {len(emaStateUpdatedData)} states, {len(emaCandleUpdatedData)} candle updates")
+                logger.info(f"Created {len(alertData)} initial alerts for token {tokenAddress}")
+                return True
                 
         except Exception as e:
-            logger.error(f"Error in batch EMA operations: {e}")
-            raise
+            logger.error(f"Error creating initial alerts: {e}")
+            return False
+    
+    def batchPersistAlerts(self, trackedTokens: List['TrackedToken']) -> int:
+        """
+        Batch persist alert data from tracked tokens
+        
+        Args:
+            trackedTokens: List of TrackedToken POJOs with alert data
+            
+        Returns:
+            int: Number of alerts updated
+        """
+        try:
+            totalAlertsUpdated = 0
+            
+            with self.conn_manager.transaction() as cursor:
+                # Collect alert data for batch operations
+                alertData = []
+                candleTrendStatusUpdates = []
+                
+                for trackedToken in trackedTokens:
+                    for timeframeRecord in trackedToken.timeframeRecords:
+                        if timeframeRecord.alert:
+                            alert = timeframeRecord.alert
+                            alertData.append((
+                                alert.tokenId,
+                                alert.tokenAddress,
+                                alert.pairAddress,
+                                alert.timeframe,
+                                alert.vwap,
+                                alert.ema12,
+                                alert.ema21,
+                                alert.ema34,
+                                alert.avwap,
+                                alert.lastUpdatedUnix,
+                                alert.trend,
+                                alert.status,
+                                alert.trend12,
+                                alert.status12,
+                                alert.touchCount,
+                                alert.latestTouchUnix,
+                                alert.touchCount12,
+                                alert.latestTouchUnix12
+                            ))
+                            totalAlertsUpdated += 1
+                            
+                            # Collect candle trend/status updates
+                            for candle in timeframeRecord.ohlcvDetails:
+                                if (candle.trend is not None or candle.status is not None or 
+                                    candle.trend12 is not None or candle.status12 is not None):
+                                    candleTrendStatusUpdates.append((
+                                        candle.trend,
+                                        candle.status,
+                                        candle.trend12,
+                                        candle.status12,
+                                        candle.tokenAddress,
+                                        candle.timeframe,
+                                        candle.unixTime
+                                    ))
+                
+                # Execute alert updates
+                if alertData:
+                    cursor.executemany("""
+                        INSERT INTO alerts 
+                        (tokenid, tokenaddress, pairaddress, timeframe, vwap, ema12, ema21, ema34, avwap,
+                         lastupdatedunix, trend, status, trend12, status12, touchcount, latesttouchunix,
+                         touchcount12, latesttouchunix12, createdat, lastupdatedat)
+                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, NOW(), NOW())
+                        ON CONFLICT (tokenaddress, timeframe) 
+                        DO UPDATE SET 
+                            vwap = EXCLUDED.vwap,
+                            ema12 = EXCLUDED.ema12,
+                            ema21 = EXCLUDED.ema21,
+                            ema34 = EXCLUDED.ema34,
+                            avwap = EXCLUDED.avwap,
+                            lastupdatedunix = EXCLUDED.lastupdatedunix,
+                            trend = EXCLUDED.trend,
+                            status = EXCLUDED.status,
+                            trend12 = EXCLUDED.trend12,
+                            status12 = EXCLUDED.status12,
+                            touchcount = EXCLUDED.touchcount,
+                            latesttouchunix = EXCLUDED.latesttouchunix,
+                            touchcount12 = EXCLUDED.touchcount12,
+                            latesttouchunix12 = EXCLUDED.latesttouchunix12,
+                            lastupdatedat = NOW()
+                    """, alertData)
+                
+                # Update candle trend/status
+                if candleTrendStatusUpdates:
+                    cursor.executemany("""
+                        UPDATE ohlcvdetails 
+                        SET trend = %s, status = %s, trend12 = %s, status12 = %s
+                        WHERE tokenaddress = %s AND timeframe = %s AND unixtime = %s
+                    """, candleTrendStatusUpdates)
+                    logger.info(f"Updated trend/status for {len(candleTrendStatusUpdates)} candles")
+                
+                logger.info(f"Batch persisted {totalAlertsUpdated} alerts")
+                return totalAlertsUpdated
+                
+        except Exception as e:
+            logger.error(f"Error in batch persist alerts: {e}")
+            return 0
+    
+    def getCurrentAlertStateAndNewCandles(self, tokenAddress: str = None) -> List['TrackedToken']:
+        try:
+            with self.conn_manager.transaction() as cursor:
+                # Build where clause
+                whereClause = "WHERE tt.status = 1"
+                params = []
+                if tokenAddress:
+                    whereClause += " AND tt.tokenaddress = %s"
+                    params.append(tokenAddress)
+                
+                # Get alerts and candles for processing
+                query = text(f"""
+                    WITH alert_data AS (
+                        SELECT 
+                            a.alertid,
+                            a.tokenid,
+                            a.tokenaddress,
+                            a.pairaddress,
+                            a.timeframe,
+                            a.vwap as alert_vwap,
+                            a.ema12 as alert_ema12,
+                            a.ema21 as alert_ema21,
+                            a.ema34 as alert_ema34,
+                            a.avwap as alert_avwap,
+                            a.lastupdatedunix,
+                            a.trend as alert_trend,
+                            a.status as alert_status,
+                            a.trend12 as alert_trend12,
+                            a.status12 as alert_status12,
+                            a.touchcount,
+                            a.latesttouchunix,
+                            a.touchcount12,
+                            a.latesttouchunix12,
+                            tt.trackedtokenid,
+                            tt.symbol,
+                            tt.name,
+                            tm.id as timeframeid,
+                            tm.lastfetchedat,
+                            es12.emaavailabletime as ema12availabletime,
+                            es21.emaavailabletime as ema21availabletime,
+                            es34.emaavailabletime as ema34availabletime
+                        FROM alerts a
+                        INNER JOIN trackedtokens tt ON a.tokenid = tt.trackedtokenid
+                        INNER JOIN timeframemetadata tm ON a.tokenaddress = tm.tokenaddress 
+                            AND a.timeframe = tm.timeframe
+                        LEFT JOIN emastates es12 ON a.tokenaddress = es12.tokenaddress 
+                            AND a.timeframe = es12.timeframe AND es12.emakey = '12'
+                        LEFT JOIN emastates es21 ON a.tokenaddress = es21.tokenaddress 
+                            AND a.timeframe = es21.timeframe AND es21.emakey = '21'
+                        LEFT JOIN emastates es34 ON a.tokenaddress = es34.tokenaddress 
+                            AND a.timeframe = es34.timeframe AND es34.emakey = '34'
+                        {whereClause}
+                    )
+                    SELECT 
+                        ad.*,
+                        o.unixtime,
+                        o.timebucket,
+                        o.openprice,
+                        o.highprice,
+                        o.lowprice,
+                        o.closeprice,
+                        o.volume,
+                        o.trades,
+                        o.vwapvalue,
+                        o.avwapvalue,
+                        o.ema12value,
+                        o.ema21value,
+                        o.ema34value,
+                        o.trend as candle_trend,
+                        o.status as candle_status,
+                        o.trend12 as candle_trend12,
+                        o.status12 as candle_status12
+                    FROM alert_data ad
+                    LEFT JOIN ohlcvdetails o ON ad.tokenaddress = o.tokenaddress 
+                        AND ad.timeframe = o.timeframe
+                        AND o.unixtime > COALESCE(ad.lastupdatedunix, 0)
+                        AND o.vwapvalue IS NOT NULL
+                        AND o.avwapvalue IS NOT NULL
+                        AND (ad.ema12availabletime IS NULL OR o.unixtime < ad.ema12availabletime OR o.ema12value IS NOT NULL)
+                        AND (ad.ema21availabletime IS NULL OR o.unixtime < ad.ema21availabletime OR o.ema21value IS NOT NULL)
+                        AND (ad.ema34availabletime IS NULL OR o.unixtime < ad.ema34availabletime OR o.ema34value IS NOT NULL)
+                    ORDER BY ad.tokenaddress, ad.timeframe, o.unixtime
+                """)
+                
+                cursor.execute(query, params)
+                records = cursor.fetchall()
+                
+                # Organize into POJOs
+                trackedTokens = {}
+                # Track seen candle timestamps per timeframe to prevent duplicates (space and time efficient)
+                seenCandles = {}  # {tokenAddress: {timeframe: set(unixTimes)}}
+                
+                for row in records:
+                    tokenAddress = row['tokenaddress']
+                    
+                    # Create or get TrackedToken
+                    if tokenAddress not in trackedTokens:
+                        trackedTokens[tokenAddress] = TrackedToken(
+                            trackedTokenId=row['trackedtokenid'],
+                            tokenAddress=tokenAddress,
+                            symbol=row['symbol'],
+                            name=row['name'],
+                            pairAddress=row['pairaddress'],
+                            addedBy='alert_processor'
+                        )
+                    
+                    # Get or create TimeframeRecord
+                    timeframe = row['timeframe']
+                    timeframeRecord = trackedTokens[tokenAddress].getTimeframeRecord(timeframe)
+                    if not timeframeRecord:
+                        timeframeRecord = TimeframeRecord(
+                            timeframeId=row['timeframeid'],
+                            tokenAddress=tokenAddress,
+                            pairAddress=row['pairaddress'],
+                            timeframe=timeframe,
+                            lastFetchedAt=row['lastfetchedat'],
+                            isActive=True
+                        )
+                        
+                        # Add alert data
+                        timeframeRecord.alert = Alert(
+                            alertId=row['alertid'],
+                            tokenId=row['tokenid'],
+                            tokenAddress=tokenAddress,
+                            pairAddress=row['pairaddress'],
+                            timeframe=timeframe,
+                            vwap=row['alert_vwap'],
+                            ema12=row['alert_ema12'],
+                            ema21=row['alert_ema21'],
+                            ema34=row['alert_ema34'],
+                            avwap=row['alert_avwap'],
+                            lastUpdatedUnix=row['lastupdatedunix'],
+                            trend=row['alert_trend'],
+                            status=row['alert_status'],
+                            trend12=row['alert_trend12'],
+                            status12=row['alert_status12'],
+                            touchCount=row['touchcount'],
+                            latestTouchUnix=row['latesttouchunix'],
+                            touchCount12=row['touchcount12'],
+                            latestTouchUnix12=row['latesttouchunix12']
+                        )
+                        
+                        if row['ema12availabletime']:
+                            timeframeRecord.ema12State = EMAState(
+                                tokenAddress=tokenAddress,
+                                pairAddress=row['pairaddress'],
+                                timeframe=timeframe,
+                                emaKey='12',
+                                emaAvailableTime=row['ema12availabletime']
+                            )
+                        if row['ema21availabletime']:
+                            timeframeRecord.ema21State = EMAState(
+                                tokenAddress=tokenAddress,
+                                pairAddress=row['pairaddress'],
+                                timeframe=timeframe,
+                                emaKey='21',
+                                emaAvailableTime=row['ema21availabletime']
+                            )
+                        if row['ema34availabletime']:
+                            timeframeRecord.ema34State = EMAState(
+                                tokenAddress=tokenAddress,
+                                pairAddress=row['pairaddress'],
+                                timeframe=timeframe,
+                                emaKey='34',
+                                emaAvailableTime=row['ema34availabletime']
+                            )
+                        
+                        trackedTokens[tokenAddress].addTimeframeRecord(timeframeRecord)
+                    
+                    # Add candle data if exists
+                    if row['unixtime']:
+                        candleUnixTime = row['unixtime']
+                        
+                        # Initialize seenCandles structure if needed
+                        if tokenAddress not in seenCandles:
+                            seenCandles[tokenAddress] = {}
+                        if timeframe not in seenCandles[tokenAddress]:
+                            seenCandles[tokenAddress][timeframe] = set()
+                        
+                        # O(1) check if candle already exists using set
+                        if candleUnixTime not in seenCandles[tokenAddress][timeframe]:
+                            # Mark as seen
+                            seenCandles[tokenAddress][timeframe].add(candleUnixTime)
+                            
+                            candle = OHLCVDetails(
+                                tokenAddress=tokenAddress,
+                                pairAddress=row['pairaddress'],
+                                timeframe=timeframe,
+                                unixTime=candleUnixTime,
+                                timeBucket=row['timebucket'],
+                                openPrice=float(row['openprice']),
+                                highPrice=float(row['highprice']),
+                                lowPrice=float(row['lowprice']),
+                                closePrice=float(row['closeprice']),
+                                volume=float(row['volume']),
+                                trades=row['trades'],
+                                vwapValue=float(row['vwapvalue']) if row['vwapvalue'] else None,
+                                avwapValue=float(row['avwapvalue']) if row['avwapvalue'] else None,
+                                ema12Value=float(row['ema12value']) if row['ema12value'] else None,
+                                ema21Value=float(row['ema21value']) if row['ema21value'] else None,
+                                ema34Value=float(row['ema34value']) if row['ema34value'] else None,
+                                trend=row['candle_trend'],
+                                status=row['candle_status'],
+                                trend12=row['candle_trend12'],
+                                status12=row['candle_status12'],
+                                isComplete=True,
+                                dataSource='database'
+                            )
+                            timeframeRecord.addOHLCVDetail(candle)
+                
+                return list(trackedTokens.values())
+                
+        except Exception as e:
+            logger.error(f"Error getting alerts for processing: {e}")
+            return []
 
     

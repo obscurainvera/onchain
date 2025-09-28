@@ -102,6 +102,7 @@ class TradingAPIUtil:
         pairAddress = data.get(TradingAPIConstants.RequestParameters.PAIR_ADDRESS, '').strip()
         ema21Data = data.get(TradingAPIConstants.Log.EMA_21_TYPE)
         ema34Data = data.get(TradingAPIConstants.Log.EMA_34_TYPE)
+        avwapData = data.get(TradingAPIConstants.Log.AVWAP_TYPE)
         addedBy = data.get(TradingAPIConstants.RequestParameters.ADDED_BY, 'api_user')
         timeframes = data.get(TradingAPIConstants.RequestParameters.TIMEFRAMES, [])
 
@@ -118,6 +119,7 @@ class TradingAPIUtil:
             TradingAPIConstants.RequestParameters.PAIR_ADDRESS: pairAddress,
             TradingAPIConstants.Log.EMA_21_TYPE: ema21Data,
             TradingAPIConstants.Log.EMA_34_TYPE: ema34Data,
+            TradingAPIConstants.Log.AVWAP_TYPE: avwapData,
             TradingAPIConstants.RequestParameters.ADDED_BY: addedBy,
             TradingAPIConstants.RequestParameters.TIMEFRAMES: timeframes
         }
@@ -154,14 +156,16 @@ class TradingAPIUtil:
         return True, ''
 
     @staticmethod
-    def validateOldTokenRequirementsAndProcessEMAData(pairAgeInDays: float, ema21Data, ema34Data) -> Tuple[bool, str, Optional[Dict]]:
+    def validateAndProcessEMAData(ema21Data, ema34Data) -> Tuple[bool, str, Optional[Dict]]:
         """
-        Validate and process per-timeframe EMA requirements for old tokens
+        Core function to validate and process EMA data
         
         Returns:
             Tuple: (success, error_message, processed_ema_data)
         """
-    
+        if not ema21Data or not ema34Data:
+            return False, 'EMA21 and EMA34 data are required', None
+        
         # Validate EMA21 data structure
         isValid, errorMsg = TradingAPIUtil.validatePerTimeframeEMAData(ema21Data, TradingAPIConstants.Log.EMA_21_TYPE)
         if not isValid:
@@ -172,7 +176,7 @@ class TradingAPIUtil:
         if not isValid:
             return False, errorMsg, None
 
-        # Parse and validate reference times for all timeframes - return in per-timeframe format directly
+        # Parse and validate reference times for all timeframes
         perTimeframeEMAData = {}
 
         for timeframe in TradingAPIConstants.Values.REQUIRED_TIMEFRAMES:
@@ -202,6 +206,54 @@ class TradingAPIUtil:
 
         return True, '', perTimeframeEMAData
 
+    @staticmethod
+    def validateNewTokenRequirements(avwapData) -> Tuple[bool, str, Optional[Dict]]:
+        """
+        Wrapper function for new token validation - only validates AVWAP data
+        
+        Args:
+            avwapData: AVWAP data (required for all tokens)
+        
+        Returns:
+            Tuple: (success, error_message, processed_avwap_data)
+        """
+        # Validate AVWAP data (mandatory for new tokens)
+        return TradingAPIUtil.validateAndProcessAVWAPData(avwapData)
+    
+    @staticmethod
+    def validateOldTokenRequirements(ema21Data, ema34Data, avwapData) -> Tuple[bool, str, Optional[Dict], Optional[Dict]]:
+        """
+        Wrapper function for old token validation - validates both EMA and AVWAP data
+        
+        Args:
+            ema21Data: EMA21 data (required for old tokens)
+            ema34Data: EMA34 data (required for old tokens)
+            avwapData: AVWAP data (required for all tokens)
+        
+        Returns:
+            Tuple: (success, error_message, processed_ema_data, processed_avwap_data)
+        """
+        # Validate AVWAP data first
+        isValid, errorMsg, processedAVWAPData = TradingAPIUtil.validateAndProcessAVWAPData(avwapData)
+        if not isValid:
+            return False, errorMsg, None, None
+        
+        # Validate EMA data
+        isValid, errorMsg, processedEMAData = TradingAPIUtil.validateAndProcessEMAData(ema21Data, ema34Data)
+        if not isValid:
+            return False, errorMsg, None, None
+        
+        return True, '', processedEMAData, processedAVWAPData
+
+    @staticmethod
+    def validateOldTokenRequirementsAndProcessEMAData(pairAgeInDays: float, ema21Data, ema34Data) -> Tuple[bool, str, Optional[Dict]]:
+        """
+        Legacy function for backward compatibility - validates only EMA data for old tokens
+        
+        Returns:
+            Tuple: (success, error_message, processed_ema_data)
+        """
+        return TradingAPIUtil.validateAndProcessEMAData(ema21Data, ema34Data)
 
     @staticmethod
     def formatSuccessResponse(tokenAddition: Dict, tokenAddress: str, pairAddress: str, 
@@ -276,3 +328,83 @@ class TradingAPIUtil:
             'validTimeframes': TimeframeConstants.VALID_NEW_TOKEN_TIMEFRAMES
             }
         return None  # No validation errors
+
+    @staticmethod
+    def validatePerTimeframeAVWAPData(avwapData: Dict) -> Tuple[bool, str]:
+        """
+        Validate per-timeframe AVWAP data structure
+        
+        Expected format:
+        {
+            "30min": {"value": "1.25", "referenceTime": "10:30 AM"},
+            "1h": {"value": "1.28", "referenceTime": "10 AM"},
+            "4h": {"value": "1.30", "referenceTime": "8 AM"}
+        }
+        """
+        if not avwapData or not isinstance(avwapData, dict):
+            return False, 'AVWAP data is required and must be a dictionary'
+        
+        # Check for all required timeframes
+        for timeframe in TradingAPIConstants.Values.REQUIRED_TIMEFRAMES:
+            if timeframe not in avwapData:
+                return False, f'Missing AVWAP data for {timeframe} timeframe'
+            
+            timeframeData = avwapData[timeframe]
+            if not isinstance(timeframeData, dict):
+                return False, f'AVWAP {timeframe} data must be a dictionary'
+            
+            # Validate required fields
+            if TradingAPIConstants.RequestParameters.VALUE not in timeframeData:
+                return False, f'Missing AVWAP value for {timeframe} timeframe'
+            
+            if TradingAPIConstants.RequestParameters.REFERENCE_TIME not in timeframeData:
+                return False, f'Missing AVWAP referenceTime for {timeframe} timeframe'
+            
+            # Validate value is numeric
+            try:
+                float(timeframeData[TradingAPIConstants.RequestParameters.VALUE])
+            except (ValueError, TypeError):
+                return False, f'AVWAP value for {timeframe} must be a valid number'
+            
+            # Validate referenceTime is a string
+            if not isinstance(timeframeData[TradingAPIConstants.RequestParameters.REFERENCE_TIME], str):
+                return False, f'AVWAP referenceTime for {timeframe} must be a string'
+        
+        return True, ''
+    
+    @staticmethod
+    def validateAndProcessAVWAPData(avwapData: Dict) -> Tuple[bool, str, Optional[Dict]]:
+        """
+        Validate and process AVWAP data, converting reference times to Unix timestamps
+        
+        Returns:
+            Tuple: (success, error_message, processed_avwap_data)
+        """
+        if not avwapData:
+            return False, 'AVWAP data is required for all tokens', None
+        
+        # Validate AVWAP data structure
+        isValid, errorMsg = TradingAPIUtil.validatePerTimeframeAVWAPData(avwapData)
+        if not isValid:
+            return False, errorMsg, None
+        
+        # Parse and validate reference times for all timeframes
+        processedAVWAPData = {}
+        
+        for timeframe in TradingAPIConstants.Values.REQUIRED_TIMEFRAMES:
+            if timeframe not in avwapData:
+                continue
+                
+            # Parse AVWAP reference time
+            avwapTimeStr = avwapData[timeframe][TradingAPIConstants.RequestParameters.REFERENCE_TIME]
+            success, errorMsg, unixTime = TradingAPIUtil.parseUserFriendlyTime(avwapTimeStr)
+            if not success:
+                return False, f'Invalid AVWAP referenceTime for {timeframe}: {errorMsg}', None
+            
+            # Build processed format
+            processedAVWAPData[timeframe] = {
+                TradingAPIConstants.RequestParameters.VALUE: avwapData[timeframe][TradingAPIConstants.RequestParameters.VALUE],
+                TradingAPIConstants.RequestParameters.REFERENCE_TIME: unixTime
+            }
+        
+        return True, '', processedAVWAPData

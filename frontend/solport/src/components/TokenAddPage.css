@@ -180,18 +180,23 @@
 }
 
 /* Badge Styling */
-.old-token-badge {
-  background-color: rgba(255, 193, 7, 0.9) !important;
-  color: #000 !important;
-  font-size: 11px !important;
-  font-weight: 500 !important;
-  padding: 4px 8px !important;
-  border-radius: 2px !important;
-  letter-spacing: 0.02em !important;
-  text-transform: uppercase !important;
+
+/* AVWAP Section Styling */
+.avwap-section {
+  background-color: rgba(13, 202, 240, 0.03) !important;
+  border-color: rgba(13, 202, 240, 0.15) !important;
 }
 
-.old-token-indicator {
+.avwap-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 20px;
+  flex-wrap: wrap;
+  gap: 15px;
+}
+
+.avwap-indicator {
   background-color: rgba(13, 202, 240, 0.9) !important;
   color: #000 !important;
   font-size: 12px !important;
@@ -202,22 +207,7 @@
   text-transform: uppercase !important;
 }
 
-/* EMA Section Styling */
-.ema-section {
-  background-color: rgba(255, 255, 255, 0.03) !important;
-  border-color: rgba(255, 255, 255, 0.15) !important;
-}
-
-.ema-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 20px;
-  flex-wrap: wrap;
-  gap: 15px;
-}
-
-.ema-description {
+.avwap-description {
   color: rgba(255, 255, 255, 0.7);
   font-size: 14px;
   margin-bottom: 30px;
@@ -225,82 +215,63 @@
   font-style: italic;
 }
 
-.ema-group {
-  background-color: rgba(255, 255, 255, 0.02);
-  border: 1px solid rgba(255, 255, 255, 0.1);
+.avwap-group {
+  background-color: rgba(13, 202, 240, 0.02);
+  border: 1px solid rgba(13, 202, 240, 0.1);
   border-radius: 2px;
   padding: 25px;
   margin-bottom: 25px;
 }
 
-.ema-group h3 {
+.avwap-group h3 {
   color: rgba(255, 255, 255, 0.9);
   font-size: 20px;
   font-weight: 400;
   margin-bottom: 20px;
   letter-spacing: 0.02em;
   text-transform: uppercase;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+  border-bottom: 1px solid rgba(13, 202, 240, 0.1);
   padding-bottom: 10px;
 }
 
-/* EMA Row Styling - New timeframe-based layout */
-.ema-row {
-  background-color: rgba(255, 255, 255, 0.01);
-  border: 1px solid rgba(255, 255, 255, 0.08);
+.avwap-row {
+  background-color: rgba(13, 202, 240, 0.01);
+  border: 1px solid rgba(13, 202, 240, 0.08);
   border-radius: 2px;
   padding: 20px;
   margin-bottom: 15px;
 }
 
-.ema-row:last-child {
+.avwap-row:last-child {
   margin-bottom: 0;
 }
 
-.ema-type-label {
+.avwap-type-label {
   color: rgba(255, 255, 255, 0.9);
   font-size: 16px;
   font-weight: 500;
   margin-bottom: 15px;
   letter-spacing: 0.02em;
   padding: 8px 12px;
-  background-color: rgba(255, 255, 255, 0.03);
+  background-color: rgba(13, 202, 240, 0.03);
   border-radius: 2px;
   display: inline-block;
-  border-left: 3px solid rgba(255, 255, 255, 0.2);
+  border-left: 3px solid rgba(13, 202, 240, 0.2);
 }
 
-/* Legacy timeframe styling - keeping for backward compatibility */
-.ema-timeframe {
-  background-color: rgba(255, 255, 255, 0.01);
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  border-radius: 2px;
-  padding: 20px;
-  margin-bottom: 15px;
-}
-
-.ema-timeframe:last-child {
-  margin-bottom: 0;
-}
-
-.timeframe-label {
-  color: rgba(255, 255, 255, 0.8);
-  font-size: 14px;
-  font-weight: 500;
-  margin-bottom: 15px;
-  letter-spacing: 0.05em;
-  text-transform: uppercase;
-  padding: 8px 12px;
-  background-color: rgba(255, 255, 255, 0.05);
-  border-radius: 2px;
-  display: inline-block;
-}
-
-.ema-input {
+.avwap-input {
   height: 48px !important;
   font-size: 14px !important;
   padding: 12px 16px !important;
+  border-color: rgba(13, 202, 240, 0.2) !important;
 }
+
+.avwap-input:focus {
+  border-color: rgba(13, 202, 240, 0.5) !important;
+  background-color: rgba(13, 202, 240, 0.08) !important;
+  box-shadow: 0 0 0 2px rgba(13, 202, 240, 0.1) !important;
+}
+
 
 /* Chart Section */
 .chart-section {
@@ -426,11 +397,12 @@
     padding: 30px;
   }
   
-  .ema-group {
+  
+  .avwap-group {
     padding: 20px;
   }
   
-  .ema-timeframe {
+  .avwap-row {
     padding: 15px;
   }
 }
@@ -485,16 +457,16 @@
     padding: 12px 16px !important;
   }
   
-  .ema-header {
+  .avwap-header {
     flex-direction: column;
     align-items: stretch;
   }
   
-  .ema-group {
+  .avwap-group {
     padding: 15px;
   }
   
-  .ema-timeframe {
+  .avwap-row {
     padding: 12px;
   }
   
@@ -607,35 +579,6 @@
   color: rgba(255, 255, 255, 0.95) !important;
 }
 
-/* Manual EMA Toggle Styling */
-.manual-ema-toggle {
-  margin-bottom: 1.5rem !important;
-}
-
-.manual-ema-toggle .form-check-input {
-  background-color: rgba(255, 255, 255, 0.05) !important;
-  border: 1px solid rgba(255, 255, 255, 0.2) !important;
-  border-radius: 2px !important;
-  width: 20px !important;
-  height: 20px !important;
-}
-
-.manual-ema-toggle .form-check-input:checked {
-  background-color: rgba(255, 255, 255, 0.9) !important;
-  border-color: rgba(255, 255, 255, 0.9) !important;
-}
-
-.manual-ema-toggle .form-check-input:focus {
-  border-color: rgba(255, 255, 255, 0.5) !important;
-  box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.1) !important;
-}
-
-.manual-ema-toggle .form-check-label {
-  color: rgba(255, 255, 255, 0.8) !important;
-  font-size: 14px !important;
-  margin-left: 8px !important;
-  cursor: pointer;
-}
 
 /* Form Group Spacing */
 .mb-4 {
@@ -688,9 +631,6 @@
   }
 }
 
-.ema-section {
-  animation: fadeInUp 0.6s ease-out;
-}
 
 .token-info-card {
   animation: fadeInUp 0.4s ease-out;

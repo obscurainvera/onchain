@@ -8,6 +8,19 @@ class CredentialType(Enum):
     USER_PASS = "USER_PASS"
     CHAT_ID = "CHAT_ID"
 
+
+class CredentialField:
+    """Constants for credential field names in servicecredentials table"""
+    API_KEY = "apikey"
+    API_SECRET = "apisecret" 
+    USERNAME = "username"
+    PASSWORD = "password"
+    METADATA = "metadata"
+    SERVICE_NAME = "servicename"
+    CREDENTIAL_TYPE = "credentialtype"
+    IS_ACTIVE = "isactive"
+
+
 class ServiceCredentials(Enum):
     
     CIELO = {

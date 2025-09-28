@@ -33,4 +33,10 @@ class IndicatorConstants:
         EMA21 = 'ema21'
         EMA34 = 'ema34'
 
+    class AVWAPStates:
+        AVWAP = 'avwap'
+        CUMULATIVE_PV = 'cumulativePV'
+        CUMULATIVE_VOLUME = 'cumulativeVolume'
+        LAST_UPDATED_UNIX = 'lastUpdatedUnix'
+
         
