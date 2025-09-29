@@ -1,7 +1,6 @@
 """
 Simple notification service
 """
-from tkinter import N
 from typing import Optional
 import json
 import requests
