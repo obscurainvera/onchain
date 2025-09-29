@@ -13,6 +13,7 @@ from apscheduler.events import EVENT_JOB_ERROR, EVENT_JOB_EXECUTED
 from config.SchedulerConfig import SCHEDULER_CONFIG
 from scheduler.TradingScheduler import TradingScheduler
 from scheduler.CredentialResetScheduler import CredentialResetScheduler
+from scheduler.PreventShutdownScheduler import PreventShutdownScheduler
 from database.operations.DatabaseConnectionManager import DatabaseConnectionManager
 from database.job.job_handler import JobHandler
 import time
@@ -64,6 +65,11 @@ def run_credential_reset_job():
     with_retries(CredentialResetScheduler.runDailyResetJob, CredentialResetScheduler)
 
 
+def run_prevent_shutdown_job():
+    """Run prevent shutdown job with retry logic."""
+    with_retries(PreventShutdownScheduler.handlePreventShutdownFromJob, PreventShutdownScheduler)
+
+
 class JobRunner:
     """
     Manages APScheduler for scheduling and executing background jobs.
@@ -97,16 +103,19 @@ class JobRunner:
         config = get_config()
         jobs = [
             ("trading_updates", {"minute": "*/5"}),
-            ("credential_reset", {"hour": "*/12", "minute": 0})
+            ("credential_reset", {"hour": "*/12", "minute": 0}),
+            ("prevent_shutdown", {"second": "*/20"})
         ]
         for job_id, default_schedule in jobs:
-            schedule = config.JOB_SCHEDULES.get(job_id, default_schedule)
+            schedule = default_schedule
 
             # Use named functions instead of lambdas
             if job_id == "trading_updates":
                 job_func = run_trading_updates_job
             elif job_id == "credential_reset":
                 job_func = run_credential_reset_job
+            elif job_id == "prevent_shutdown":
+                job_func = run_prevent_shutdown_job
             
 
             self.scheduler.add_job(

@@ -112,23 +112,11 @@ class Config:
     # Job scheduler settings
     JOBS_DB_PATH = os.getenv("JOBS_DB_PATH", os.path.join(PROJECT_ROOT, "jobs.db"))
 
-    JOB_SCHEDULES = {
-        "trading_updates": {"minute": "*/5"}
-    }
-
-    VOLUME_COOKIE = os.getenv("VOLUME_COOKIE", "default_volume_cookie")
-    PUMPFUN_COOKIE = os.getenv("PUMPFUN_COOKIE", "default_pump_fun_cookie")
-
-    VOLUME_EXPIRY = os.getenv("VOLUME_EXPIRY", "2025-12-31")
-    PUMPFUN_EXPIRY = os.getenv("PUMPFUN_EXPIRY", "2023-12-31")
+    # Prevent shutdown settings
+    PREVENT_SHUTDOWN_URL = os.getenv("PREVENT_SHUTDOWN_URL", "")
+    PREVENT_EXTERNAL_SHUTDOWN_URL = os.getenv("PREVENT_EXTERNAL_SHUTDOWN_URL", "")
 
     def get_database_url(self) -> str:
-        """
-        Get the database URL based on configuration.
-
-        Returns:
-            str: Database URL
-        """
         if self.DB_TYPE == "sqlite":
             return f"sqlite:///{self.DB_PATH}"
         else:
