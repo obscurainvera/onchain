@@ -5,6 +5,7 @@ import PortfolioCalculator from './components/PortfolioCalculator';
 import TokenAddPage from './components/TokenAddPage';
 import TokenListPage from './components/TokenListPage';
 import TokenDisablePage from './components/TokenDisablePage';
+import TokenEnablePage from './components/TokenEnablePage';
 import './App.css';
 import { FaCoins } from 'react-icons/fa';
 
@@ -24,6 +25,7 @@ function App() {
             <NavLink to="/addtoken" className={({ isActive }) => isActive ? "App-link active" : "App-link"}>Add Token</NavLink>
             <NavLink to="/tokens" className={({ isActive }) => isActive ? "App-link active" : "App-link"}>Token List</NavLink>
             <NavLink to="/disabletoken" className={({ isActive }) => isActive ? "App-link active" : "App-link"}>Disable Token</NavLink>
+            <NavLink to="/enabletoken" className={({ isActive }) => isActive ? "App-link active" : "App-link"}>Enable Token</NavLink>
           </nav>
         </header>
         <main className="container fade-in">
@@ -33,6 +35,7 @@ function App() {
             <Route path="/addtoken" element={<TokenAddPage />} />
             <Route path="/tokens" element={<TokenListPage />} />
             <Route path="/disabletoken" element={<TokenDisablePage />} />
+            <Route path="/enabletoken" element={<TokenEnablePage />} />
             <Route path="/tokenmetrics" element={
               <div className="coming-soon">
                 <h2>Token Metrics</h2>
