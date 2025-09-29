@@ -49,12 +49,13 @@ def addToken():
         # Step 2: Convert to POJO
         addTokenRequest = AddTokenRequest.from_dict(data)
         
-        # Step 3: Check if token is already active        
-        existingTokens = trading_handler.getActiveTokens()
-        for existing in existingTokens:
-            if existing[TradingHandlerConstants.TrackedTokens.TOKEN_ADDRESS] == addTokenRequest.tokenAddress:
-                return jsonify(AddTokenResponse.error_response('Token {addTokenRequest.tokenAddress} is already being tracked'
-                ).to_dict()), 409
+        # Step 3: Check if token exists and enable if found
+        existingTokenId = trading_handler.enableTokenIfExists(addTokenRequest.tokenAddress)
+        
+        if existingTokenId:
+            return jsonify(AddTokenResponse.error_response(
+                f'Token {addTokenRequest.tokenAddress} is already being tracked'
+            ).to_dict()), 409
 
         # Step 4: Get token information from DexScreener API        
         dexAction = DexScreenerAction()
@@ -167,6 +168,83 @@ def disableToken():
         }), 500
 
 
+@trading_bp.route('/api/tokens/enable', methods=['POST', 'OPTIONS'])
+def enableToken():
+    """
+    Enable Token API - POST /api/tokens/enable
+    
+    REQUEST BODY:
+    {
+        "tokenAddress": "So11111111111111111111111111111111111111112",
+        "reason": "Volume improved",
+        "enabledBy": "admin@example.com"
+    }
+    """
+    if request.method == 'OPTIONS':
+        return jsonify({}), 200
+    
+    try:
+        data = request.get_json()
+        if not data:
+            return jsonify({
+                'success': False,
+                'error': 'No JSON data provided'
+            }), 400
+        
+        # Extract and validate required fields
+        token_address = data.get('tokenAddress', '').strip()
+        reason = data.get('reason', '').strip()
+        enabled_by = data.get('enabledBy', 'api_user')
+        
+        # Validate required fields
+        if not token_address:
+            return jsonify({
+                'success': False,
+                'error': 'Missing required field: tokenAddress'
+            }), 400
+        
+        # Enable the token using optimized database operation
+        logger.info(f"Enabling token: {token_address} - Reason: {reason}")
+        
+        result = trading_handler.enableToken(
+            tokenAddress=token_address,
+            enabledBy=enabled_by,
+            reason=reason
+        )
+        
+        if not result['success']:
+            if 'not found' in result['error'].lower():
+                return jsonify({
+                    'success': False,
+                    'error': f'Token {token_address} not found or already enabled'
+                }), 404
+            else:
+                return jsonify({
+                    'success': False,
+                    'error': f'Failed to enable token: {result["error"]}'
+                }), 500
+        
+        token_info = result['tokenInfo']
+        logger.info(f"Successfully enabled token {token_info['symbol']} ({token_address})")
+        
+        return jsonify({
+            'success': True,
+            'tokenAddress': token_address,
+            'symbol': token_info['symbol'],
+            'name': token_info['name'],
+            'reason': reason,
+            'enabledBy': enabled_by,
+            'message': f'Token {token_info["symbol"]} enabled successfully'
+        }), 200
+        
+    except Exception as e:
+        logger.error(f"Error in enableToken API: {str(e)}", exc_info=True)
+        return jsonify({
+            'success': False,
+            'error': f'Internal server error: {str(e)}'
+        }), 500
+
+
 @trading_bp.route('/api/tokens/list', methods=['GET', 'OPTIONS'])
 def listTokens():
     """
@@ -205,7 +283,14 @@ def listTokens():
             }), 400
        
         # Get tokens based on status
-        tokens = trading_handler.getActiveTokens()
+        if status == 'active':
+            tokens = trading_handler.getActiveTokens()
+        elif status == 'disabled':
+            tokens = trading_handler.getDisabledTokens()
+        else:  # all
+            active_tokens = trading_handler.getActiveTokens()
+            disabled_tokens = trading_handler.getDisabledTokens()
+            tokens = active_tokens + disabled_tokens
        
         # Apply pagination
         total_count = len(tokens)

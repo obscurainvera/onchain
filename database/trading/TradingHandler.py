@@ -342,6 +342,64 @@ class TradingHandler(BaseDBHandler):
                 'tokenInfo': None
             }
 
+    def enableToken(self, tokenAddress: str, enabledBy: str = None, reason: str = None) -> Dict[str, Any]:
+        """
+        Enable token tracking (re-enable disabled token)
+        
+        Args:
+            tokenAddress: Token contract address
+            enabledBy: User who enabled the token
+            reason: Reason for enabling
+            
+        Returns:
+            Dict containing success status and token info if successful
+        """
+        try:
+            now = datetime.now(timezone.utc)
+            
+            with self.conn_manager.transaction() as cursor:
+                # Update token status and return token info in one query
+                cursor.execute(
+                    text("""
+                        UPDATE trackedtokens 
+                        SET status = 1, enabledat = %s, disabledat = NULL, disabledby = NULL, lastupdatedat = %s
+                        WHERE tokenaddress = %s AND status = 2
+                        RETURNING trackedtokenid, symbol, name, tokenaddress
+                    """),
+                    (now, now, tokenAddress)
+                )
+                result = cursor.fetchone()
+                
+                if not result:
+                    logger.warning(f"Token {tokenAddress} not found or already enabled")
+                    return {
+                        'success': False,
+                        'error': 'Token not found or already enabled',
+                        'tokenInfo': None
+                    }
+
+                
+                tokenInfo = {
+                    'trackedtokenid': result['trackedtokenid'],
+                    'symbol': result['symbol'],
+                    'name': result['name'],
+                    'tokenaddress': result['tokenaddress']
+                }
+                
+                logger.info(f"Enabled token {tokenInfo['symbol']} ({tokenAddress}) - reason: {reason}")
+                return {
+                    'success': True,
+                    'tokenInfo': tokenInfo
+                }
+                
+        except Exception as e:
+            logger.error(f"Error enabling token {tokenAddress}: {e}")
+            return {
+                'success': False,
+                'error': str(e),
+                'tokenInfo': None
+            }
+
     def getActiveTokens(self) -> List[Dict]:
         """Get all active tracked tokens with their metadata"""
         try:
@@ -362,6 +420,55 @@ class TradingHandler(BaseDBHandler):
         except Exception as e:
             logger.error(f"Error getting active tokens: {e}")
             return []
+
+    def getDisabledTokens(self) -> List[Dict]:
+        """Get all disabled tracked tokens with their metadata"""
+        try:
+            with self.conn_manager.transaction() as cursor:
+                cursor.execute(
+                    text("""
+                        SELECT t.*, 
+                               COUNT(tm.id) as active_timeframes
+                        FROM trackedtokens t
+                        LEFT JOIN timeframemetadata tm ON t.tokenaddress = tm.tokenaddress
+                        WHERE t.status = 2
+                        GROUP BY t.trackedtokenid
+                        ORDER BY t.disabledat DESC
+                    """)
+                )
+                results = cursor.fetchall()
+                return [dict(row) for row in results]
+        except Exception as e:
+            logger.error(f"Error getting disabled tokens: {e}")
+            return []
+
+    def enableTokenIfExists(self, tokenAddress: str) -> Optional[int]:
+        """
+        Enable existing token if found in trackedtokens table
+        
+        Args:
+            tokenAddress: Token contract address
+            
+        Returns:
+            Token ID if found and enabled, None if not found
+        """
+        try:
+            with self.conn_manager.transaction() as cursor:
+                cursor.execute(
+                    text("""
+                        UPDATE trackedtokens 
+                        SET status = 1, enabledat = NOW(), disabledat = NULL, disabledby = NULL, lastupdatedat = NOW()
+                        WHERE tokenaddress = %s
+                        RETURNING trackedtokenid
+                    """),
+                    (tokenAddress,)
+                )
+                result = cursor.fetchone()
+                return result['trackedtokenid'] if result else None
+                
+        except Exception as e:
+            logger.error(f"Error enabling token {tokenAddress}: {e}")
+            return None
 
     
     def _calculateTimeBucket(self, unixtime: int, timeframe: str) -> int:
