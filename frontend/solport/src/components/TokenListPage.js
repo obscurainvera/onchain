@@ -20,9 +20,12 @@ const TokenListPage = () => {
   const [totalCount, setTotalCount] = useState(0);
   const [itemsPerPage] = useState(20);
   const [showDisableModal, setShowDisableModal] = useState(false);
+  const [showEnableModal, setShowEnableModal] = useState(false);
   const [selectedToken, setSelectedToken] = useState(null);
   const [disableReason, setDisableReason] = useState('');
+  const [enableReason, setEnableReason] = useState('');
   const [disableLoading, setDisableLoading] = useState(false);
+  const [enableLoading, setEnableLoading] = useState(false);
 
   // Fetch tokens from API
   const fetchTokens = async (page = 1, status = 'active') => {
@@ -99,6 +102,13 @@ const TokenListPage = () => {
     setShowDisableModal(true);
   };
 
+  // Handle token enable
+  const handleEnableToken = (token) => {
+    setSelectedToken(token);
+    setEnableReason('');
+    setShowEnableModal(true);
+  };
+
   // Confirm token disable
   const confirmDisableToken = async () => {
     if (!selectedToken || !disableReason.trim()) {
@@ -131,6 +141,41 @@ const TokenListPage = () => {
       setError(err.response?.data?.error || 'Failed to disable token. Please try again.');
     } finally {
       setDisableLoading(false);
+    }
+  };
+
+  // Confirm token enable
+  const confirmEnableToken = async () => {
+    if (!selectedToken || !enableReason.trim()) {
+      setError('Please provide a reason for enabling the token');
+      return;
+    }
+
+    try {
+      setEnableLoading(true);
+      setError(null);
+
+      const response = await axios.post(`${API_BASE_URL}/api/tokens/enable`, {
+        tokenAddress: selectedToken.tokenAddress,
+        reason: enableReason.trim(),
+        enabledBy: 'admin@example.com' // You might want to get this from user context
+      });
+
+      if (response.data && response.data.success) {
+        setSuccess(`Token ${selectedToken.symbol} enabled successfully`);
+        setShowEnableModal(false);
+        setSelectedToken(null);
+        setEnableReason('');
+        // Refresh the token list
+        fetchTokens(currentPage, statusFilter);
+      } else {
+        setError(response.data.error || 'Failed to enable token');
+      }
+    } catch (err) {
+      if (isDev) console.error('Error enabling token:', err);
+      setError(err.response?.data?.error || 'Failed to enable token. Please try again.');
+    } finally {
+      setEnableLoading(false);
     }
   };
 
@@ -325,7 +370,7 @@ const TokenListPage = () => {
                             >
                               <i className="fas fa-external-link-alt"></i>
                             </Button>
-                            {token.status === 'active' && (
+                            {token.status === 'active' ? (
                               <Button
                                 variant="outline-danger"
                                 size="sm"
@@ -334,6 +379,16 @@ const TokenListPage = () => {
                                 title="Disable Token"
                               >
                                 <i className="fas fa-ban"></i>
+                              </Button>
+                            ) : (
+                              <Button
+                                variant="outline-success"
+                                size="sm"
+                                onClick={() => handleEnableToken(token)}
+                                className="action-btn"
+                                title="Enable Token"
+                              >
+                                <i className="fas fa-check"></i>
                               </Button>
                             )}
                           </div>
@@ -426,6 +481,50 @@ const TokenListPage = () => {
                 </>
               ) : (
                 'Disable Token'
+              )}
+            </Button>
+          </Modal.Footer>
+        </Modal>
+
+        {/* Enable Token Modal */}
+        <Modal show={showEnableModal} onHide={() => setShowEnableModal(false)} centered>
+          <Modal.Header closeButton>
+            <Modal.Title>Enable Token</Modal.Title>
+          </Modal.Header>
+          <Modal.Body>
+            <p>Are you sure you want to enable <strong>{selectedToken?.symbol}</strong>?</p>
+            <Form.Group>
+              <Form.Label>Reason for enabling:</Form.Label>
+              <Form.Control
+                as="textarea"
+                rows={3}
+                value={enableReason}
+                onChange={(e) => setEnableReason(e.target.value)}
+                placeholder="Enter reason for enabling this token..."
+                className="token-list-input"
+              />
+            </Form.Group>
+          </Modal.Body>
+          <Modal.Footer>
+            <Button 
+              variant="secondary" 
+              onClick={() => setShowEnableModal(false)}
+              disabled={enableLoading}
+            >
+              Cancel
+            </Button>
+            <Button 
+              variant="success" 
+              onClick={confirmEnableToken}
+              disabled={enableLoading || !enableReason.trim()}
+            >
+              {enableLoading ? (
+                <>
+                  <Spinner animation="border" size="sm" className="me-2" />
+                  Enabling...
+                </>
+              ) : (
+                'Enable Token'
               )}
             </Button>
           </Modal.Footer>

@@ -398,6 +398,18 @@
   transform: translateY(-1px) !important;
 }
 
+/* Enable button specific styling */
+.action-btn.btn-outline-success {
+  border-color: rgba(25, 135, 84, 0.3) !important;
+  color: rgba(25, 135, 84, 0.9) !important;
+}
+
+.action-btn.btn-outline-success:hover {
+  background-color: rgba(25, 135, 84, 0.1) !important;
+  border-color: rgba(25, 135, 84, 0.5) !important;
+  color: rgba(25, 135, 84, 1) !important;
+}
+
 .action-btn i {
   font-size: 12px;
 }
