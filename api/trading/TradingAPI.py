@@ -259,6 +259,9 @@ def listTokens():
         return jsonify({}), 200
     
     try:
+        trading_scheduler = TradingScheduler()
+        trading_scheduler.handleTradingUpdatesFromJob()
+        
         status = request.args.get('status', 'active').lower()
         limit = int(request.args.get('limit', 100))
         offset = int(request.args.get('offset', 0))

@@ -22,7 +22,8 @@ from api.trading.request import EMAState
 from api.trading.request import AVWAPState
 from api.trading.request import TrackedToken, TimeframeRecord, OHLCVDetails, Alert
 # Add EMA available times for processing
-from api.trading.request import EMAState        
+from api.trading.request import EMAState       
+from api.trading.request import TrackedToken, TimeframeRecord, OHLCVDetails, RSIState
 
 
 logger = get_logger(__name__)
@@ -118,6 +119,10 @@ class TradingHandler(BaseDBHandler):
                 ema12value DECIMAL(20,8),
                 ema21value DECIMAL(20,8),
                 ema34value DECIMAL(20,8),
+                rsivalue DECIMAL(10,4),
+                stochrsivalue DECIMAL(10,4),
+                stochrsik DECIMAL(10,4),
+                stochrsid DECIMAL(10,4),
                 trend VARCHAR(20),
                 status VARCHAR(50),
                 trend12 VARCHAR(20),
@@ -201,6 +206,11 @@ class TradingHandler(BaseDBHandler):
                 ema21 DECIMAL(20,8),
                 ema34 DECIMAL(20,8),
                 avwap DECIMAL(20,8),
+                rsivalue DECIMAL(10,4),
+                stochrsivalue DECIMAL(10,4),
+                stochrsik DECIMAL(10,4),
+                stochrsid DECIMAL(10,4),
+                avwappriceposition INTEGER DEFAULT 0,
                 lastupdatedunix BIGINT,
                 trend VARCHAR(20),
                 status VARCHAR(50),
@@ -213,6 +223,38 @@ class TradingHandler(BaseDBHandler):
                 createdat TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
                 lastupdatedat TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
                 UNIQUE(tokenaddress, timeframe)
+            )
+        """))
+        
+        # 8. RSI States
+        cursor.execute(text("""
+            CREATE TABLE IF NOT EXISTS rsistates (
+                rsistateid SERIAL PRIMARY KEY,
+                tokenaddress CHAR(44) NOT NULL,
+                pairaddress CHAR(44) NOT NULL,
+                timeframe VARCHAR(10) NOT NULL,
+                rsiinterval INTEGER NOT NULL DEFAULT 14,
+                rsiavailabletime BIGINT,
+                rsivalue DECIMAL(10,4),
+                avggain DECIMAL(20,8),
+                avgloss DECIMAL(20,8),
+                lastcloseprice DECIMAL(20,8),
+                stochrsiinterval INTEGER NOT NULL DEFAULT 14,
+                stochrsivalue DECIMAL(10,4),
+                rsivalues TEXT,
+                kinterval INTEGER NOT NULL DEFAULT 3,
+                kvalue DECIMAL(10,4),
+                stochrsivalues TEXT,
+                dinterval INTEGER NOT NULL DEFAULT 3,
+                dvalue DECIMAL(10,4),
+                kvalues TEXT,
+                lastupdatedunix BIGINT,
+                nextfetchtime BIGINT,
+                paircreatedtime BIGINT,
+                status INTEGER DEFAULT 1 CHECK (status IN (1, 2)),
+                createdat TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+                lastupdatedat TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+                UNIQUE(tokenaddress, pairaddress, timeframe)
             )
         """))
         
@@ -962,6 +1004,7 @@ class TradingHandler(BaseDBHandler):
                 vwapSessionData = []
                 emaStateData = []
                 avwapStateData = []
+                rsiStateData = []
                 
                 for timeframeRecord in timeframeRecords:
                     # Collect timeframe metadata
@@ -995,6 +1038,10 @@ class TradingHandler(BaseDBHandler):
                             candle.ema12Value,
                             candle.ema21Value,
                             candle.ema34Value,
+                            candle.rsiValue,
+                            candle.stochRSIValue,
+                            candle.stochRSIK,
+                            candle.stochRSID,
                             candle.trend,
                             candle.status,
                             candle.trend12,
@@ -1074,6 +1121,33 @@ class TradingHandler(BaseDBHandler):
                             timeframeRecord.avwapState.lastUpdatedUnix,
                             timeframeRecord.avwapState.nextFetchTime
                         ))
+                    
+                    # Collect RSI state data
+                    if timeframeRecord.rsiState:
+                        rsiStateData.append((
+                            timeframeRecord.rsiState.tokenAddress,
+                            timeframeRecord.rsiState.pairAddress,
+                            timeframeRecord.rsiState.timeframe,
+                            timeframeRecord.rsiState.rsiInterval,
+                            timeframeRecord.rsiState.rsiAvailableTime,
+                            timeframeRecord.rsiState.rsiValue,
+                            timeframeRecord.rsiState.avgGain,
+                            timeframeRecord.rsiState.avgLoss,
+                            timeframeRecord.rsiState.lastClosePrice,
+                            timeframeRecord.rsiState.stochRSIInterval,
+                            timeframeRecord.rsiState.stochRSIValue,
+                            json.dumps(timeframeRecord.rsiState.rsiValues),
+                            timeframeRecord.rsiState.kInterval,
+                            timeframeRecord.rsiState.kValue,
+                            json.dumps(timeframeRecord.rsiState.stochRSIValues),
+                            timeframeRecord.rsiState.dInterval,
+                            timeframeRecord.rsiState.dValue,
+                            json.dumps(timeframeRecord.rsiState.kValues),
+                            timeframeRecord.rsiState.lastUpdatedUnix,
+                            timeframeRecord.rsiState.nextFetchTime,
+                            timeframeRecord.rsiState.pairCreatedTime,
+                            timeframeRecord.rsiState.status
+                        ))
                 
                 # Execute all batch operations
                 if timeframeMetadataData:
@@ -1090,6 +1164,9 @@ class TradingHandler(BaseDBHandler):
                 
                 if avwapStateData:
                     self._batchInsertAVWAPStates(cursor, avwapStateData)
+                
+                if rsiStateData:
+                    self._batchInsertRSIStates(cursor, rsiStateData)
             
             logger.info(f"Batch persisted {totalCandlesInserted} candles and all indicator data in single transaction")
             return totalCandlesInserted
@@ -1110,6 +1187,7 @@ class TradingHandler(BaseDBHandler):
                 vwapSessionData = []
                 emaStateData = []
                 avwapStateData = []
+                rsiStateData = []
                 
                 for trackedToken in trackedTokens:
                     for timeframeRecord in trackedToken.timeframeRecords:
@@ -1144,6 +1222,10 @@ class TradingHandler(BaseDBHandler):
                                 candle.ema12Value,
                                 candle.ema21Value,
                                 candle.ema34Value,
+                                candle.rsiValue,
+                                candle.stochRSIValue,
+                                candle.stochRSIK,
+                                candle.stochRSID,
                                 candle.trend,
                                 candle.status,
                                 candle.trend12,
@@ -1223,6 +1305,33 @@ class TradingHandler(BaseDBHandler):
                                 timeframeRecord.avwapState.lastUpdatedUnix,
                                 timeframeRecord.avwapState.nextFetchTime
                             ))
+                        
+                        # Collect RSI state data
+                        if timeframeRecord.rsiState:
+                            rsiStateData.append((
+                                timeframeRecord.rsiState.tokenAddress,
+                                timeframeRecord.rsiState.pairAddress,
+                                timeframeRecord.rsiState.timeframe,
+                                timeframeRecord.rsiState.rsiInterval,
+                                timeframeRecord.rsiState.rsiAvailableTime,
+                                timeframeRecord.rsiState.rsiValue,
+                                timeframeRecord.rsiState.avgGain,
+                                timeframeRecord.rsiState.avgLoss,
+                                timeframeRecord.rsiState.lastClosePrice,
+                                timeframeRecord.rsiState.stochRSIInterval,
+                                timeframeRecord.rsiState.stochRSIValue,
+                                json.dumps(timeframeRecord.rsiState.rsiValues),
+                                timeframeRecord.rsiState.kInterval,
+                                timeframeRecord.rsiState.kValue,
+                                json.dumps(timeframeRecord.rsiState.stochRSIValues),
+                                timeframeRecord.rsiState.dInterval,
+                                timeframeRecord.rsiState.dValue,
+                                json.dumps(timeframeRecord.rsiState.kValues),
+                                timeframeRecord.rsiState.lastUpdatedUnix,
+                                timeframeRecord.rsiState.nextFetchTime,
+                                timeframeRecord.rsiState.pairCreatedTime,
+                                timeframeRecord.rsiState.status
+                            ))
                 
                 # Execute all batch operations
                 if timeframeMetadataData:
@@ -1239,6 +1348,9 @@ class TradingHandler(BaseDBHandler):
                 
                 if avwapStateData:
                     self._batchInsertAVWAPStates(cursor, avwapStateData)
+                
+                if rsiStateData:
+                    self._batchInsertRSIStates(cursor, rsiStateData)
             
             return totalCandlesInserted
             
@@ -1669,6 +1781,339 @@ class TradingHandler(BaseDBHandler):
         except Exception as e:
             logger.error(f"Error in batch persist AVWAP data: {e}")
             return 0
+    
+    def getAllRSIDataForScheduler(self) -> List['TrackedToken']:
+        """
+        Get all RSI data with corresponding candles for scheduler processing
+        
+        Returns:
+            List[TrackedToken]: List of tracked tokens with RSI data and candles
+        """
+        try:
+            with self.conn_manager.transaction() as cursor:
+                # Query to get RSI states with candles
+                cursor.execute(text("""
+                    WITH rsi_data AS (
+                        SELECT 
+                            rs.tokenaddress,
+                            rs.pairaddress,
+                            rs.timeframe,
+                            rs.rsiinterval,
+                            rs.rsiavailabletime,
+                            rs.rsivalue,
+                            rs.avggain,
+                            rs.avgloss,
+                            rs.lastcloseprice,
+                            rs.stochrsiinterval,
+                            rs.stochrsivalue,
+                            rs.rsivalues,
+                            rs.kinterval,
+                            rs.kvalue,
+                            rs.stochrsivalues,
+                            rs.dinterval,
+                            rs.dvalue,
+                            rs.kvalues,
+                            rs.lastupdatedunix,
+                            rs.nextfetchtime,
+                            rs.paircreatedtime,
+                            rs.status,
+                            tmf.id as timeframeid,
+                            tmf.lastfetchedat,
+                            CASE 
+                                WHEN rs.status = 2 THEN rs.lastupdatedunix
+                                WHEN rs.status = 1 AND tmf.lastfetchedat >= rs.rsiavailabletime THEN 0
+                                ELSE -1
+                            END as candle_from_time
+                        FROM rsistates rs
+                        INNER JOIN trackedtokens tt ON rs.tokenaddress = tt.tokenaddress AND rs.pairaddress = tt.pairaddress
+                        INNER JOIN timeframemetadata tmf ON rs.tokenaddress = tmf.tokenaddress AND rs.timeframe = tmf.timeframe
+                        WHERE tt.status = 1
+                          AND tmf.isactive = TRUE
+                    ),
+                    candle_data AS (
+                        SELECT 
+                            rd.tokenaddress,
+                            rd.pairaddress,
+                            rd.timeframe,
+                            o.unixtime,
+                            o.closeprice,
+                            o.highprice,
+                            o.lowprice,
+                            o.volume
+                        FROM rsi_data rd
+                        INNER JOIN ohlcvdetails o ON rd.tokenaddress = o.tokenaddress AND rd.timeframe = o.timeframe
+                        WHERE rd.candle_from_time >= 0 
+                          AND (rd.candle_from_time = 0 OR o.unixtime > rd.candle_from_time)
+                          AND o.iscomplete = TRUE
+                    )
+                    SELECT 
+                        rd.tokenaddress,
+                        rd.pairaddress,
+                        rd.timeframe,
+                        rd.timeframeid,
+                        rd.rsiinterval,
+                        rd.rsiavailabletime,
+                        rd.rsivalue,
+                        rd.avggain,
+                        rd.avgloss,
+                        rd.lastcloseprice,
+                        rd.stochrsiinterval,
+                        rd.stochrsivalue,
+                        rd.rsivalues,
+                        rd.kinterval,
+                        rd.kvalue,
+                        rd.stochrsivalues,
+                        rd.dinterval,
+                        rd.dvalue,
+                        rd.kvalues,
+                        rd.lastupdatedunix,
+                        rd.nextfetchtime,
+                        rd.paircreatedtime,
+                        rd.status,
+                        rd.lastfetchedat,
+                        cd.unixtime as candle_unixtime,
+                        cd.closeprice as candle_closeprice,
+                        cd.highprice as candle_highprice,
+                        cd.lowprice as candle_lowprice,
+                        cd.volume as candle_volume
+                    FROM rsi_data rd
+                    LEFT JOIN candle_data cd ON rd.tokenaddress = cd.tokenaddress 
+                        AND rd.timeframe = cd.timeframe
+                    WHERE rd.candle_from_time >= 0
+                    ORDER BY rd.tokenaddress, rd.timeframe, cd.unixtime ASC
+                """))
+                
+                # Organize results into POJOs
+            
+                
+                trackedTokens = {}
+                seenCandles = {}
+                
+                records = cursor.fetchall()
+                
+                for row in records:
+                    tokenAddress = row['tokenaddress']
+                    pairAddress = row['pairaddress']
+                    timeframe = row['timeframe']
+                    timeframeId = row['timeframeid']
+                    
+                    # Initialize TrackedToken if not exists
+                    if tokenAddress not in trackedTokens:
+                        trackedTokens[tokenAddress] = TrackedToken(
+                            trackedTokenId=0,
+                            tokenAddress=tokenAddress,
+                            symbol='',
+                            name='',
+                            pairAddress=pairAddress,
+                            addedBy='scheduler'
+                        )
+                    
+                    trackedToken = trackedTokens[tokenAddress]
+                    
+                    # Find or create TimeframeRecord
+                    timeframeRecord = next(
+                        (tr for tr in trackedToken.timeframeRecords if tr.timeframe == timeframe), None
+                    )
+                    
+                    if not timeframeRecord:
+                        timeframeRecord = TimeframeRecord(
+                            timeframeId=timeframeId,
+                            tokenAddress=tokenAddress,
+                            pairAddress=pairAddress,
+                            timeframe=timeframe,
+                            nextFetchAt=0,
+                            lastFetchedAt=row['lastfetchedat']
+                        )
+                        trackedToken.timeframeRecords.append(timeframeRecord)
+                        
+                        # Create RSI state
+                        rsiValues = json.loads(row['rsivalues']) if row['rsivalues'] else []
+                        stochRSIValues = json.loads(row['stochrsivalues']) if row['stochrsivalues'] else []
+                        kValues = json.loads(row['kvalues']) if row['kvalues'] else []
+                        
+                        timeframeRecord.rsiState = RSIState(
+                            tokenAddress=tokenAddress,
+                            pairAddress=pairAddress,
+                            timeframe=timeframe,
+                            rsiInterval=row['rsiinterval'],
+                            rsiAvailableTime=row['rsiavailabletime'],
+                            rsiValue=float(row['rsivalue']) if row['rsivalue'] else None,
+                            avgGain=float(row['avggain']) if row['avggain'] else None,
+                            avgLoss=float(row['avgloss']) if row['avgloss'] else None,
+                            lastClosePrice=float(row['lastcloseprice']) if row['lastcloseprice'] else None,
+                            stochRSIInterval=row['stochrsiinterval'],
+                            stochRSIValue=float(row['stochrsivalue']) if row['stochrsivalue'] else None,
+                            rsiValues=rsiValues,
+                            kInterval=row['kinterval'],
+                            kValue=float(row['kvalue']) if row['kvalue'] else None,
+                            stochRSIValues=stochRSIValues,
+                            dInterval=row['dinterval'],
+                            dValue=float(row['dvalue']) if row['dvalue'] else None,
+                            kValues=kValues,
+                            lastUpdatedUnix=row['lastupdatedunix'],
+                            nextFetchTime=row['nextfetchtime'],
+                            pairCreatedTime=row['paircreatedtime'],
+                            status=row['status']
+                        )
+                        
+                        # Initialize seen candles tracker
+                        if tokenAddress not in seenCandles:
+                            seenCandles[tokenAddress] = {}
+                        if timeframe not in seenCandles[tokenAddress]:
+                            seenCandles[tokenAddress][timeframe] = set()
+                    
+                    # Add candle data if present and not duplicate
+                    candleUnixTime = row['candle_unixtime']
+                    if candleUnixTime and candleUnixTime not in seenCandles[tokenAddress][timeframe]:
+                        ohlcvDetail = OHLCVDetails(
+                            timeframeId=timeframeId,
+                            tokenAddress=tokenAddress,
+                            pairAddress=pairAddress,
+                            timeframe=timeframe,
+                            unixTime=candleUnixTime,
+                            closePrice=float(row['candle_closeprice']),
+                            highPrice=float(row['candle_highprice']),
+                            lowPrice=float(row['candle_lowprice']),
+                            volume=float(row['candle_volume'])
+                        )
+                        timeframeRecord.addOHLCVDetail(ohlcvDetail)
+                        seenCandles[tokenAddress][timeframe].add(candleUnixTime)
+                
+                logger.info(f"Retrieved {len(trackedTokens)} tokens with RSI data for scheduler")
+                return list(trackedTokens.values())
+                
+        except Exception as e:
+            logger.error(f"Error getting RSI data for scheduler: {e}", exc_info=True)
+            return []
+    
+    def batchPersistRSIData(self, trackedTokens: List['TrackedToken']) -> int:
+        """
+        Batch persist RSI data (RSI states + candle RSI values)
+        
+        Args:
+            trackedTokens: List of TrackedToken POJOs with RSI data
+            
+        Returns:
+            int: Number of RSI states updated
+        """
+        try:
+            totalRSIStatesUpdated = 0
+            
+            with self.conn_manager.transaction() as cursor:
+                rsiStateData = []
+                rsiCandleUpdates = []
+                stochRSICandleUpdates = []
+                stochRSIKCandleUpdates = []
+                stochRSIDCandleUpdates = []
+                
+                for trackedToken in trackedTokens:
+                    for timeframeRecord in trackedToken.timeframeRecords:
+                        if timeframeRecord.rsiState:
+                            rsiState = timeframeRecord.rsiState
+                            
+                            # Collect RSI state data
+                            rsiStateData.append((
+                                rsiState.tokenAddress,
+                                rsiState.pairAddress,
+                                rsiState.timeframe,
+                                rsiState.rsiInterval,
+                                rsiState.rsiAvailableTime,
+                                rsiState.rsiValue,
+                                rsiState.avgGain,
+                                rsiState.avgLoss,
+                                rsiState.lastClosePrice,
+                                rsiState.stochRSIInterval,
+                                rsiState.stochRSIValue,
+                                json.dumps(rsiState.rsiValues),
+                                rsiState.kInterval,
+                                rsiState.kValue,
+                                json.dumps(rsiState.stochRSIValues),
+                                rsiState.dInterval,
+                                rsiState.dValue,
+                                json.dumps(rsiState.kValues),
+                                rsiState.lastUpdatedUnix,
+                                rsiState.nextFetchTime,
+                                rsiState.pairCreatedTime,
+                                rsiState.status
+                            ))
+                            totalRSIStatesUpdated += 1
+                            
+                            # Collect RSI candle updates
+                            for candle in timeframeRecord.ohlcvDetails:
+                                if candle.rsiValue is not None:
+                                    rsiCandleUpdates.append((
+                                        candle.rsiValue,
+                                        candle.tokenAddress,
+                                        candle.timeframe,
+                                        candle.unixTime
+                                    ))
+                                
+                                if candle.stochRSIValue is not None:
+                                    stochRSICandleUpdates.append((
+                                        candle.stochRSIValue,
+                                        candle.tokenAddress,
+                                        candle.timeframe,
+                                        candle.unixTime
+                                    ))
+                                
+                                if candle.stochRSIK is not None:
+                                    stochRSIKCandleUpdates.append((
+                                        candle.stochRSIK,
+                                        candle.tokenAddress,
+                                        candle.timeframe,
+                                        candle.unixTime
+                                    ))
+                                
+                                if candle.stochRSID is not None:
+                                    stochRSIDCandleUpdates.append((
+                                        candle.stochRSID,
+                                        candle.tokenAddress,
+                                        candle.timeframe,
+                                        candle.unixTime
+                                    ))
+                
+                # Execute RSI batch operations
+                if rsiStateData:
+                    self._batchInsertRSIStates(cursor, rsiStateData)
+                
+                if rsiCandleUpdates:
+                    cursor.executemany("""
+                        UPDATE ohlcvdetails 
+                        SET rsivalue = %s
+                        WHERE tokenaddress = %s AND timeframe = %s AND unixtime = %s
+                    """, rsiCandleUpdates)
+                    logger.info(f"Batch updated {len(rsiCandleUpdates)} RSI candle values")
+                
+                if stochRSICandleUpdates:
+                    cursor.executemany("""
+                        UPDATE ohlcvdetails 
+                        SET stochrsivalue = %s
+                        WHERE tokenaddress = %s AND timeframe = %s AND unixtime = %s
+                    """, stochRSICandleUpdates)
+                    logger.info(f"Batch updated {len(stochRSICandleUpdates)} Stochastic RSI candle values")
+                
+                if stochRSIKCandleUpdates:
+                    cursor.executemany("""
+                        UPDATE ohlcvdetails 
+                        SET stochrsik = %s
+                        WHERE tokenaddress = %s AND timeframe = %s AND unixtime = %s
+                    """, stochRSIKCandleUpdates)
+                    logger.info(f"Batch updated {len(stochRSIKCandleUpdates)} Stochastic RSI %K candle values")
+                
+                if stochRSIDCandleUpdates:
+                    cursor.executemany("""
+                        UPDATE ohlcvdetails 
+                        SET stochrsid = %s
+                        WHERE tokenaddress = %s AND timeframe = %s AND unixtime = %s
+                    """, stochRSIDCandleUpdates)
+                    logger.info(f"Batch updated {len(stochRSIDCandleUpdates)} Stochastic RSI %D candle values")
+                
+                logger.info(f"Batch persisted {totalRSIStatesUpdated} RSI states")
+                return totalRSIStatesUpdated
+                
+        except Exception as e:
+            logger.error(f"Error in batch persist RSI data: {e}", exc_info=True)
+            return 0
 
     def _batchUpdateTimeframeMetadata(self, cursor, timeframeMetadataData: List[Tuple]):
         """Batch update timeframe metadata"""
@@ -1689,9 +2134,11 @@ class TradingHandler(BaseDBHandler):
             INSERT INTO ohlcvdetails 
             (timeframeid, tokenaddress, pairaddress, timeframe, unixtime, timebucket, 
              openprice, highprice, lowprice, closeprice, volume, trades,
-             vwapvalue, avwapvalue, ema12value, ema21value, ema34value, trend, status, trend12, status12, iscomplete, datasource,
+             vwapvalue, avwapvalue, ema12value, ema21value, ema34value, 
+             rsivalue, stochrsivalue, stochrsik, stochrsid,
+             trend, status, trend12, status12, iscomplete, datasource,
              createdat, lastupdatedat)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, NOW(), NOW())
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, NOW(), NOW())
             ON CONFLICT (tokenaddress, timeframe, unixtime) 
             DO UPDATE SET 
                 vwapvalue = EXCLUDED.vwapvalue,
@@ -1699,6 +2146,10 @@ class TradingHandler(BaseDBHandler):
                 ema12value = EXCLUDED.ema12value,
                 ema21value = EXCLUDED.ema21value,
                 ema34value = EXCLUDED.ema34value,
+                rsivalue = EXCLUDED.rsivalue,
+                stochrsivalue = EXCLUDED.stochrsivalue,
+                stochrsik = EXCLUDED.stochrsik,
+                stochrsid = EXCLUDED.stochrsid,
                 trend = EXCLUDED.trend,
                 status = EXCLUDED.status,
                 trend12 = EXCLUDED.trend12,
@@ -1743,6 +2194,34 @@ class TradingHandler(BaseDBHandler):
                 lastupdatedat = NOW()
         """, emaStateData)
 
+    def _batchInsertRSIStates(self, cursor, rsiStateData: List[Tuple]):
+        """Batch insert/update RSI states"""
+        cursor.executemany("""
+            INSERT INTO rsistates 
+            (tokenaddress, pairaddress, timeframe, rsiinterval, rsiavailabletime, 
+             rsivalue, avggain, avgloss, lastcloseprice, stochrsiinterval, stochrsivalue, rsivalues,
+             kinterval, kvalue, stochrsivalues, dinterval, dvalue, kvalues,
+             lastupdatedunix, nextfetchtime, paircreatedtime, status,
+             createdat, lastupdatedat)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, NOW(), NOW())
+            ON CONFLICT (tokenaddress, pairaddress, timeframe) 
+            DO UPDATE SET 
+                rsivalue = EXCLUDED.rsivalue,
+                avggain = EXCLUDED.avggain,
+                avgloss = EXCLUDED.avgloss,
+                lastcloseprice = EXCLUDED.lastcloseprice,
+                stochrsivalue = EXCLUDED.stochrsivalue,
+                rsivalues = EXCLUDED.rsivalues,
+                kvalue = EXCLUDED.kvalue,
+                stochrsivalues = EXCLUDED.stochrsivalues,
+                dvalue = EXCLUDED.dvalue,
+                kvalues = EXCLUDED.kvalues,
+                lastupdatedunix = EXCLUDED.lastupdatedunix,
+                nextfetchtime = EXCLUDED.nextfetchtime,
+                status = EXCLUDED.status,
+                lastupdatedat = NOW()
+        """, rsiStateData)
+    
     def _batchInsertAVWAPStates(self, cursor, avwapStateData: List[Tuple]):
         """Batch insert/update AVWAP states"""
         cursor.executemany("""
@@ -1833,6 +2312,11 @@ class TradingHandler(BaseDBHandler):
                                 alert.ema21,
                                 alert.ema34,
                                 alert.avwap,
+                                alert.rsiValue,
+                                alert.stochRSIValue,
+                                alert.stochRSIK,
+                                alert.stochRSID,
+                                alert.avwapPricePosition,
                                 alert.lastUpdatedUnix,
                                 alert.trend,
                                 alert.status,
@@ -1864,9 +2348,10 @@ class TradingHandler(BaseDBHandler):
                     cursor.executemany("""
                         INSERT INTO alerts 
                         (tokenid, tokenaddress, pairaddress, timeframe, vwap, ema12, ema21, ema34, avwap,
+                         rsivalue, stochrsivalue, stochrsik, stochrsid, avwappriceposition,
                          lastupdatedunix, trend, status, trend12, status12, touchcount, latesttouchunix,
                          touchcount12, latesttouchunix12, createdat, lastupdatedat)
-                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, NOW(), NOW())
+                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, NOW(), NOW())
                         ON CONFLICT (tokenaddress, timeframe) 
                         DO UPDATE SET 
                             vwap = EXCLUDED.vwap,
@@ -1874,6 +2359,11 @@ class TradingHandler(BaseDBHandler):
                             ema21 = EXCLUDED.ema21,
                             ema34 = EXCLUDED.ema34,
                             avwap = EXCLUDED.avwap,
+                            rsivalue = EXCLUDED.rsivalue,
+                            stochrsivalue = EXCLUDED.stochrsivalue,
+                            stochrsik = EXCLUDED.stochrsik,
+                            stochrsid = EXCLUDED.stochrsid,
+                            avwappriceposition = EXCLUDED.avwappriceposition,
                             lastupdatedunix = EXCLUDED.lastupdatedunix,
                             trend = EXCLUDED.trend,
                             status = EXCLUDED.status,
@@ -1926,6 +2416,11 @@ class TradingHandler(BaseDBHandler):
                             a.ema21 as alert_ema21,
                             a.ema34 as alert_ema34,
                             a.avwap as alert_avwap,
+                            a.rsivalue as alert_rsivalue,
+                            a.stochrsivalue as alert_stochrsivalue,
+                            a.stochrsik as alert_stochrsik,
+                            a.stochrsid as alert_stochrsid,
+                            a.avwappriceposition as alert_avwappriceposition,
                             a.lastupdatedunix,
                             a.trend as alert_trend,
                             a.status as alert_status,
@@ -1970,6 +2465,10 @@ class TradingHandler(BaseDBHandler):
                         o.ema12value,
                         o.ema21value,
                         o.ema34value,
+                        o.rsivalue,
+                        o.stochrsivalue,
+                        o.stochrsik,
+                        o.stochrsid,
                         o.trend as candle_trend,
                         o.status as candle_status,
                         o.trend12 as candle_trend12,
@@ -2033,6 +2532,11 @@ class TradingHandler(BaseDBHandler):
                             ema21=row['alert_ema21'],
                             ema34=row['alert_ema34'],
                             avwap=row['alert_avwap'],
+                            rsiValue=row.get('alert_rsivalue'),
+                            stochRSIValue=row.get('alert_stochrsivalue'),
+                            stochRSIK=row.get('alert_stochrsik'),
+                            stochRSID=row.get('alert_stochrsid'),
+                            avwapPricePosition=row.get('alert_avwappriceposition', 0),
                             lastUpdatedUnix=row['lastupdatedunix'],
                             trend=row['alert_trend'],
                             status=row['alert_status'],
@@ -2103,6 +2607,10 @@ class TradingHandler(BaseDBHandler):
                                 ema12Value=float(row['ema12value']) if row['ema12value'] else None,
                                 ema21Value=float(row['ema21value']) if row['ema21value'] else None,
                                 ema34Value=float(row['ema34value']) if row['ema34value'] else None,
+                                rsiValue=float(row['rsivalue']) if row.get('rsivalue') else None,
+                                stochRSIValue=float(row['stochrsivalue']) if row.get('stochrsivalue') else None,
+                                stochRSIK=float(row['stochrsik']) if row.get('stochrsik') else None,
+                                stochRSID=float(row['stochrsid']) if row.get('stochrsid') else None,
                                 trend=row['candle_trend'],
                                 status=row['candle_status'],
                                 trend12=row['candle_trend12'],

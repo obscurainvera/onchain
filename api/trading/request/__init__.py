@@ -10,6 +10,7 @@ from .OHLCVDetails import OHLCVDetails
 from .VWAPSession import VWAPSession
 from .EMAState import EMAState
 from .AVWAPState import AVWAPState
+from .RSIState import RSIState
 from .TrackedToken import TrackedToken
 from .Alert import Alert, TrendType
 
@@ -23,6 +24,7 @@ __all__ = [
     'VWAPSession',
     'EMAState',
     'AVWAPState',
+    'RSIState',
     'TrackedToken',
     'Alert',
     'TrendType'

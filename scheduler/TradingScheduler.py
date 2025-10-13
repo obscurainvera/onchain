@@ -8,6 +8,7 @@ from api.trading.request import TrackedToken, OHLCVDetails
 from scheduler.VWAPProcessor import VWAPProcessor
 from scheduler.EMAProcessor import EMAProcessor
 from scheduler.AVWAPProcessor import AVWAPProcessor
+from scheduler.RSIProcessor import RSIProcessor
 from scheduler.AlertsProcessor import AlertsProcessor
 from utils.CommonUtil import CommonUtil
 
@@ -24,6 +25,7 @@ class TradingScheduler:
         self.vwap_processor = VWAPProcessor(self.trading_handler)
         self.ema_processor = EMAProcessor(self.trading_handler)
         self.avwap_processor = AVWAPProcessor(self.trading_handler, self.trading_action.moralis_handler)
+        self.rsi_processor = RSIProcessor(self.trading_handler)
         self.alerts_processor = AlertsProcessor(self.trading_handler)
         self.current_time = int(time.time())
         logger.info("Trading scheduler initialized with POJO-based flow and alerts")
@@ -39,6 +41,8 @@ class TradingScheduler:
             self.calculateAndPersistEMAIndicators()
             
             self.calculateAndPersistAVWAPIndicators()
+            
+            self.calculateAndPersistRSIIndicators()
             
             self.calculateAndPersistAlerts() # we need to check whether running the alerts processing in a sequential order affect the time take to run this scheduler, if it goes over 10 mins, then there would a delay fetching the recent candles
             
@@ -171,6 +175,24 @@ class TradingScheduler:
             
         except Exception as e:
             logger.error(f"✗ AVWAP Calculation Failed: {e}")
+    
+    def calculateAndPersistRSIIndicators(self):
+        try:
+            logger.info("RSI Calculation Started")
+            
+            trackedTokens = self.trading_handler.getAllRSIDataForScheduler()
+            
+            if not trackedTokens:
+                logger.info("No RSI data to process")
+                return
+            
+            self.rsi_processor.calculateRSIForAllTrackedTokens(trackedTokens)
+            self.trading_handler.batchPersistRSIData(trackedTokens)
+            
+            logger.info(f"✓ RSI Calculation Completed for {len(trackedTokens)} tokens")
+            
+        except Exception as e:
+            logger.error(f"✗ RSI Calculation Failed: {e}")
     
     def calculateAndPersistAlerts(self):
         try:

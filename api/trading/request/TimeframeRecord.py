@@ -12,6 +12,7 @@ if TYPE_CHECKING:
     from .EMAState import EMAState
     from .AVWAPState import AVWAPState
     from .Alert import Alert
+    from .RSIState import RSIState
 
 @dataclass
 class TimeframeRecord:
@@ -33,6 +34,7 @@ class TimeframeRecord:
     ema21State: Optional['EMAState'] = None
     ema34State: Optional['EMAState'] = None
     avwapState: Optional['AVWAPState'] = None
+    rsiState: Optional['RSIState'] = None
     alert: Optional['Alert'] = None
     
     def addOHLCVDetail(self, ohlcv: 'OHLCVDetails'):

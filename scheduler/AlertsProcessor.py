@@ -17,6 +17,7 @@ from utils.CommonUtil import CommonUtil
 from scheduler.AlertsProcessorTypes import BandInfo, PriceInterval, IntervalType, BandType, PositionType
 from notification.handlers.BullishCrossNotification import BullishCrossNotification
 from notification.handlers.BandTouchNotification import BandTouchNotification
+from config.AVWAPPricePositionEnum import AVWAPPricePosition
 
 if TYPE_CHECKING:
     from database.trading.TradingHandler import TradingHandler
@@ -95,6 +96,47 @@ class AlertsProcessor:
                     existingAlert.recordTouch12(candle.unixTime)
                     logger.info(f"EMA 12/21 touch recorded for {tokenAddress} {timeframeRecord.timeframe}")
                     self.sendBandTouchNotification(ChatCredentials.BAND_TOUCH_CHAT.value, trackedToken, timeframeRecord, candle, existingAlert)
+    
+    def processAVWAPBreakoutAlert(self, existingAlert: 'Alert', candle: 'OHLCVDetails',
+                                  trackedToken: 'TrackedToken', timeframeRecord: 'TimeframeRecord') -> None:
+        """
+        Process AVWAP breakout alert
+        
+        Logic:
+        - Send alert once when price closes above AVWAP for the first time
+        - Track state using avwapPricePosition enum
+        - Reset flag when price goes back below AVWAP
+        
+        Args:
+            existingAlert: Current alert state
+            candle: Current candle being processed
+            trackedToken: Token being tracked
+            timeframeRecord: Timeframe record
+        """
+        try:
+            closePrice = candle.closePrice
+            avwapValue = candle.avwapValue
+            
+            if avwapValue is None:
+                return
+            
+            # Check if we should send breakout alert
+            if existingAlert.shouldSendAVWAPBreakoutAlert(closePrice, avwapValue):
+                # Price crossed above AVWAP - send alert
+                existingAlert.markPriceAboveAVWAP()
+                logger.info(f"✓ AVWAP Breakout detected for {trackedToken.tokenAddress} {timeframeRecord.timeframe}: "
+                           f"Close={closePrice:.8f}, AVWAP={avwapValue:.8f}")
+                # TODO: Implement AVWAP breakout notification handler
+                # self.sendAVWAPBreakoutNotification(ChatCredentials.AVWAP_BREAKOUT_CHAT, trackedToken, timeframeRecord, candle)
+            
+            elif closePrice < avwapValue and existingAlert.avwapPricePosition == AVWAPPricePosition.ABOVE_AVWAP.positionCode:
+                # Price went back below AVWAP - reset flag
+                existingAlert.markPriceBelowAVWAP()
+                logger.info(f"✓ Price moved below AVWAP for {trackedToken.tokenAddress} {timeframeRecord.timeframe}: "
+                           f"Close={closePrice:.8f}, AVWAP={avwapValue:.8f} - Reset breakout flag")
+            
+        except Exception as e:
+            logger.error(f"✗ Error processing AVWAP breakout alert: {e}", exc_info=True)
 
     def calculateStatus(self, candle: 'OHLCVDetails', emaFastValue: Optional[float] = None, emaSlowValue: Optional[float] = None, 
                        emaFastLabel: str = 'EMA21', emaSlowLabel: str = 'EMA34') -> str:
@@ -300,7 +342,9 @@ class AlertsProcessor:
                     existingAlert, candle, previousTrend, currentTrend, 
                     previousTrend12, currentTrend12, trackedToken, timeframeRecord, 'ema12'
                 )
-
+                
+                # Process AVWAP breakout alert
+                self.processAVWAPBreakoutAlert(existingAlert, candle, trackedToken, timeframeRecord)
                 
                 # Update indicator values in alert
                 existingAlert.updateIndicatorValues(
@@ -308,7 +352,11 @@ class AlertsProcessor:
                     ema12=candle.ema12Value,
                     ema21=candle.ema21Value,
                     ema34=candle.ema34Value,
-                    avwap=candle.avwapValue
+                    avwap=candle.avwapValue,
+                    rsiValue=candle.rsiValue,
+                    stochRSIValue=candle.stochRSIValue,
+                    stochRSIK=candle.stochRSIK,
+                    stochRSID=candle.stochRSID
                 )
                 # Update trend and status
                 existingAlert.updateTrendAndStatus(currentTrend, currentStatus, candle.unixTime)
