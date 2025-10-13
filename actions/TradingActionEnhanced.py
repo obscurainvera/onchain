@@ -12,15 +12,15 @@ from constants.TradingHandlerConstants import TradingHandlerConstants
 from scheduler.VWAPProcessor import VWAPProcessor
 from scheduler.EMAProcessor import EMAProcessor
 from scheduler.AVWAPProcessor import AVWAPProcessor
+from scheduler.RSIProcessor import RSIProcessor
 from scheduler.SchedulerConstants import CandleDataKeys
 from api.trading.request import (AddTokenRequest, TokenInfo, AllTimeframesCandleData, TimeframeCandleData, 
-                                 TimeframeRecord, OHLCVDetails, EMAState, AVWAPState)
+                                 TimeframeRecord, OHLCVDetails, EMAState, AVWAPState, RSIState)
 from api.trading.response import AddTokenResponse
 from models.Candle import Candle
 from utils.CommonUtil import CommonUtil
-from scheduler.VWAPProcessor import VWAPProcessor
-from scheduler.EMAProcessor import EMAProcessor
-from scheduler.AVWAPProcessor import AVWAPProcessor
+
+
 
 
 logger = get_logger(__name__)
@@ -39,6 +39,7 @@ class TradingActionEnhanced:
         self.vwap_processor = VWAPProcessor(self.trading_handler)
         self.ema_processor = EMAProcessor(self.trading_handler)
         self.avwap_processor = AVWAPProcessor(self.trading_handler, self.moralis_handler)
+        self.rsi_processor = RSIProcessor(self.trading_handler)
  
 
     
@@ -212,13 +213,16 @@ class TradingActionEnhanced:
                 logger.info(f"Processing indicators for {timeframe} timeframe")
                 
                 # Calculate VWAP
-                VWAPProcessor(self.trading_handler).calculateVWAPInMemory(timeframeRecord, tokenAddress, pairAddress)
+                self.vwap_processor.calculateVWAPInMemory(timeframeRecord, tokenAddress, pairAddress)
                 
                 # Calculate EMA
-                EMAProcessor(self.trading_handler).calculateEMAInMemory(timeframeRecord, tokenAddress, pairAddress, pairCreatedTime)
+                self.ema_processor.calculateEMAInMemory(timeframeRecord, tokenAddress, pairAddress, pairCreatedTime)
                 
                 # Calculate AVWAP
-                AVWAPProcessor(self.trading_handler).calculateAVWAPInMemory(timeframeRecord, tokenAddress, pairAddress)
+                self.avwap_processor.calculateAVWAPInMemory(timeframeRecord, tokenAddress, pairAddress)
+                
+                # Calculate RSI
+                self.rsi_processor.calculateRSIInMemory(timeframeRecord, tokenAddress, pairAddress, pairCreatedTime)
             
             logger.info(f"Successfully calculated all indicators in memory for {tokenAddress}")
             

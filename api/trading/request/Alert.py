@@ -3,6 +3,7 @@ Alert POJO for tracking indicator crosses and price touches
 """
 from typing import Optional
 from enum import Enum
+from config.AVWAPPricePositionEnum import AVWAPPricePosition
 
 class TrendType(Enum):
     """Trend types for alert tracking"""
@@ -26,6 +27,10 @@ class Alert:
                  ema21: Optional[float] = None,
                  ema34: Optional[float] = None,
                  avwap: Optional[float] = None,
+                 rsiValue: Optional[float] = None,
+                 stochRSIValue: Optional[float] = None,
+                 stochRSIK: Optional[float] = None,
+                 stochRSID: Optional[float] = None,
                  lastUpdatedUnix: Optional[int] = None,
                  trend: Optional[str] = None,
                  status: Optional[str] = None,
@@ -34,7 +39,8 @@ class Alert:
                  touchCount: int = 0,
                  latestTouchUnix: Optional[int] = None,
                  touchCount12: int = 0,
-                 latestTouchUnix12: Optional[int] = None):
+                 latestTouchUnix12: Optional[int] = None,
+                 avwapPricePosition: int = AVWAPPricePosition.BELOW_AVWAP.positionCode):
         """
         Initialize Alert instance
         
@@ -49,6 +55,10 @@ class Alert:
             ema21: 21-period EMA value
             ema34: 34-period EMA value
             avwap: AVWAP value
+            rsiValue: RSI value (0-100)
+            stochRSIValue: Stochastic RSI value (0-100)
+            stochRSIK: Stochastic RSI %K value (fast line)
+            stochRSID: Stochastic RSI %D value (slow line/signal)
             lastUpdatedUnix: Last update timestamp
             trend: Current trend (BULLISH/BEARISH/NEUTRAL)
             status: Encoded status representing band order and price position
@@ -56,6 +66,8 @@ class Alert:
             latestTouchUnix: Timestamp of latest touch
             touchCount12: Number of times price touched EMA12 bands
             latestTouchUnix12: Timestamp of latest touch
+            avwapPricePosition: Integer code tracking price position relative to AVWAP
+                (0 = BELOW_AVWAP, 1 = ABOVE_AVWAP)
         """
         self.alertId = alertId
         self.tokenId = tokenId
@@ -67,6 +79,10 @@ class Alert:
         self.ema21 = ema21
         self.ema34 = ema34
         self.avwap = avwap
+        self.rsiValue = rsiValue
+        self.stochRSIValue = stochRSIValue
+        self.stochRSIK = stochRSIK
+        self.stochRSID = stochRSID
         self.lastUpdatedUnix = lastUpdatedUnix
         self.trend = trend
         self.status = status
@@ -76,9 +92,12 @@ class Alert:
         self.latestTouchUnix = latestTouchUnix
         self.touchCount12 = touchCount12
         self.latestTouchUnix12 = latestTouchUnix12
+        self.avwapPricePosition = avwapPricePosition
     
     def updateIndicatorValues(self, vwap: float = None, ema21: float = None, 
-                             ema34: float = None, avwap: float = None, ema12: float = None):
+                             ema34: float = None, avwap: float = None, ema12: float = None,
+                             rsiValue: float = None, stochRSIValue: float = None,
+                             stochRSIK: float = None, stochRSID: float = None):
         """Update indicator values"""
         if vwap is not None:
             self.vwap = vwap
@@ -90,6 +109,14 @@ class Alert:
             self.ema34 = ema34
         if avwap is not None:
             self.avwap = avwap
+        if rsiValue is not None:
+            self.rsiValue = rsiValue
+        if stochRSIValue is not None:
+            self.stochRSIValue = stochRSIValue
+        if stochRSIK is not None:
+            self.stochRSIK = stochRSIK
+        if stochRSID is not None:
+            self.stochRSID = stochRSID
     
     def updateTrendAndStatus(self, trend: str, status: str, candleUnixTime: int):
         """Update trend and status with timestamp"""
@@ -145,3 +172,37 @@ class Alert:
         if self.latestTouchUnix is None:
             return True
         return (currentCandleUnixTime - self.latestTouchUnix) >= touchThresholdSeconds
+    
+    def markPriceAboveAVWAP(self) -> None:
+        """Mark that price is now above AVWAP"""
+        self.avwapPricePosition = AVWAPPricePosition.ABOVE_AVWAP.positionCode
+    
+    def markPriceBelowAVWAP(self) -> None:
+        """Mark that price is now below AVWAP (reset for next breakout)"""
+        self.avwapPricePosition = AVWAPPricePosition.BELOW_AVWAP.positionCode
+    
+    def shouldSendAVWAPBreakoutAlert(self, closePrice: float, avwapValue: Optional[float]) -> bool:
+        """
+        Determine if AVWAP breakout alert should be sent
+        
+        Logic:
+        - Send alert once when:
+          1. AVWAP value exists
+          2. Close price is above AVWAP
+          3. Price wasn't above AVWAP before (position = BELOW_AVWAP)
+        
+        Args:
+            closePrice: Current candle close price
+            avwapValue: Current AVWAP value
+            
+        Returns:
+            bool: True if alert should be sent (first time above AVWAP)
+        """
+        if avwapValue is None:
+            return False
+        
+        # Send alert only on first breakout (when price crosses from below to above)
+        if closePrice > avwapValue and self.avwapPricePosition == AVWAPPricePosition.BELOW_AVWAP.positionCode:
+            return True
+        
+        return False

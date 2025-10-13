@@ -33,6 +33,12 @@ class OHLCVDetails:
     ema21Value: Optional[float] = None
     ema34Value: Optional[float] = None
     
+    # RSI Indicator values
+    rsiValue: Optional[float] = None
+    stochRSIValue: Optional[float] = None
+    stochRSIK: Optional[float] = None
+    stochRSID: Optional[float] = None
+    
     # Alert-related fields
     trend: Optional[str] = None
     status: Optional[str] = None
@@ -67,6 +73,18 @@ class OHLCVDetails:
         if ema34Value is not None:
             self.ema34Value = ema34Value
     
+    def updateRSIValues(self, rsiValue: float = None, stochRSIValue: float = None, 
+                        stochRSIK: float = None, stochRSID: float = None):
+        """Update RSI indicator values for this candle"""
+        if rsiValue is not None:
+            self.rsiValue = rsiValue
+        if stochRSIValue is not None:
+            self.stochRSIValue = stochRSIValue
+        if stochRSIK is not None:
+            self.stochRSIK = stochRSIK
+        if stochRSID is not None:
+            self.stochRSID = stochRSID
+    
     def toDict(self) -> dict:
         """Convert to dictionary for database insertion"""
         return {
@@ -87,6 +105,10 @@ class OHLCVDetails:
             'ema12value': self.ema12Value,
             'ema21value': self.ema21Value,
             'ema34value': self.ema34Value,
+            'rsivalue': self.rsiValue,
+            'stochrsivalue': self.stochRSIValue,
+            'stochrsik': self.stochRSIK,
+            'stochrsid': self.stochRSID,
             'trend': self.trend,
             'status': self.status,
             'trend12': self.trend12,
