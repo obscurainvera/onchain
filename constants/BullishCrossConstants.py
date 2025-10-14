@@ -120,7 +120,7 @@ class StochRSIOversoldDefaults:
     STRATEGY_TYPE = "Stochastic RSI Oversold Strategy"
     # Configurable oversold thresholds (0-100 range for Stochastic RSI %K and %D)
     K_OVERSOLD_THRESHOLD = 20.0  # %K below this value is considered oversold
-    D_OVERSOLD_THRESHOLD = 20.0  # %D below this value is considered oversold
+    D_OVERSOLD_THRESHOLD = 25.0  # %D below this value is considered oversold
 
 
 class StochRSIOversoldFields:
@@ -141,8 +141,8 @@ class StochRSIOverboughtDefaults:
     DEFAULT_CHAT_NAME = ChatCredentials.STOCH_RSI_OVERBOUGHT_CHAT.value
     STRATEGY_TYPE = "Stochastic RSI Overbought Strategy"
     # Configurable overbought thresholds (0-100 range for Stochastic RSI %K and %D)
-    K_OVERBOUGHT_THRESHOLD = 80.0  # %K above this value is considered overbought
-    D_OVERBOUGHT_THRESHOLD = 80.0  # %D above this value is considered overbought
+    K_OVERBOUGHT_THRESHOLD = 75.0  # %K above this value is considered overbought
+    D_OVERBOUGHT_THRESHOLD = 60.0  # %D above this value is considered overbought
 
 
 class StochRSIOverboughtFields:
