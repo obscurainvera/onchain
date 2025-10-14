@@ -1,0 +1,70 @@
+"""
+AVWAP Breakout Notification Handler - Handles AVWAP breakout specific notifications
+
+This module contains all logic specific to AVWAP breakout notifications,
+including data preparation, URL building, and message formatting.
+"""
+
+from typing import Optional, TYPE_CHECKING
+from logs.logger import get_logger
+from constants.BullishCrossConstants import AVWAPBreakoutDefaults, AVWAPBreakoutFields, AVWAPBreakoutUrls
+from notification.utils.NotificationUtil import NotificationUtil
+from notification.NotificationManager import NotificationService
+from notification.NotificationType import NotificationType
+from notification.types.AVWAPBreakout import AVWAPBreakout
+from api.trading.request import TrackedToken, TimeframeRecord, OHLCVDetails
+
+logger = get_logger(__name__)
+
+
+class AVWAPBreakoutNotification:
+    """Static methods for handling AVWAP breakout notifications"""
+    
+    @staticmethod
+    def sendAlert(chatName: str, trackedToken: 'TrackedToken', timeframeRecord: 'TimeframeRecord', candle: 'OHLCVDetails') -> bool:
+        try:
+            chatCredentials = NotificationUtil.getChatCredentials(chatName)
+            if not chatCredentials:
+                logger.error(f"No credentials found for chat: {chatName}")
+                return False
+            
+            avwapData = AVWAPBreakoutNotification.createAVWAPBreakoutData(trackedToken, timeframeRecord, candle)
+            
+            commonMessage = AVWAPBreakout.formatMessage(avwapData)
+            
+            notificationService = NotificationService()
+            success = notificationService.sendNotification(
+                chatCredentials=chatCredentials,
+                notificationType=NotificationType.AVWAP_BREAKOUT,
+                commonMessage=commonMessage
+            )
+            
+            return success
+            
+        except Exception as e:
+            logger.error(f"Error sending AVWAP breakout notification for {trackedToken.symbol}: {e}")
+            return False
+    
+    @staticmethod
+    def createAVWAPBreakoutData(trackedToken: 'TrackedToken', timeframeRecord: 'TimeframeRecord', 
+                                candle: 'OHLCVDetails') -> AVWAPBreakout.Data:
+        return AVWAPBreakout.Data(
+            symbol=trackedToken.symbol,
+            tokenAddress=trackedToken.tokenAddress,
+            timeframe=timeframeRecord.timeframe,
+            currentPrice=float(candle.closePrice),
+            avwapValue=float(candle.avwapValue) if candle.avwapValue else 0.0,
+            unixTime=candle.unixTime,
+            time=NotificationUtil.formatUnixTime(candle.unixTime),
+            strategyType=AVWAPBreakoutDefaults.STRATEGY_TYPE,
+            dexScreenerUrl=AVWAPBreakoutNotification.buildDexScreenerUrl(trackedToken.tokenAddress)
+        )
+    
+    @staticmethod
+    def buildDexScreenerUrl(tokenAddress: str) -> Optional[str]:
+        try:
+            return AVWAPBreakoutUrls.DEXSCREENER_BASE.format(tokenAddress=tokenAddress)
+        except Exception:
+            return None
+
+    

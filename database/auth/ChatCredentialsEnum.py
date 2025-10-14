@@ -13,7 +13,12 @@ class ChatCredentials(Enum):
     """Enum for chat credential service names"""
     
     BULLISH_CROSS_CHAT = "BULLISH_CROSS_CHAT"
+    BEARISH_CROSS_CHAT = "BEARISH_CROSS_CHAT"
     BAND_TOUCH_CHAT = "BAND_TOUCH_CHAT"
+    AVWAP_BREAKOUT_CHAT = "AVWAP_BREAKOUT_CHAT"
+    AVWAP_BREAKDOWN_CHAT = "AVWAP_BREAKDOWN_CHAT"
+    STOCH_RSI_OVERSOLD_CHAT = "STOCH_RSI_OVERSOLD_CHAT"
+    STOCH_RSI_OVERBOUGHT_CHAT = "STOCH_RSI_OVERBOUGHT_CHAT"
     
     @classmethod
     def getAllChatNames(cls) -> List[str]:

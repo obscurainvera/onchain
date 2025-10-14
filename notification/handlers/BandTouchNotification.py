@@ -28,10 +28,14 @@ class BandTouchNotification:
 
     @staticmethod
     def sendAlert(chatName: str, trackedToken: 'TrackedToken', timeframeRecord: 'TimeframeRecord',
-                  candle: 'OHLCVDetails', alert: 'Alert') -> bool:
+                  candle: 'OHLCVDetails', alert: 'Alert', shortEmaLabel: str, longEmaLabel: str) -> bool:
         """
         Send band touch notification.
         Only sends for first and second touches.
+        
+        Args:
+            shortEmaLabel: Label for short EMA (e.g., "EMA12", "EMA21")
+            longEmaLabel: Label for long EMA (e.g., "EMA21", "EMA34")
         """
         try:
             if not ChatCredentials.isValidChatName(chatName):
@@ -49,6 +53,16 @@ class BandTouchNotification:
                 return False
 
             notificationService = NotificationService()
+            
+            # Get EMA values from candle
+            emaMap = {
+                'EMA12': candle.ema12Value,
+                'EMA21': candle.ema21Value,
+                'EMA34': candle.ema34Value
+            }
+            
+            shortEmaValue = emaMap.get(shortEmaLabel)
+            longEmaValue = emaMap.get(longEmaLabel)
 
             bandTouchData = BandTouch.Data(
                 symbol=trackedToken.symbol,
@@ -58,6 +72,13 @@ class BandTouchNotification:
                 touchCount=alert.touchCount,
                 unixTime=candle.unixTime,
                 time=NotificationUtil.formatUnixTime(candle.unixTime),
+                emaShortValue=float(shortEmaValue) if shortEmaValue is not None else None,
+                emaShortLabel=shortEmaLabel,
+                emaLongValue=float(longEmaValue) if longEmaValue is not None else None,
+                emaLongLabel=longEmaLabel,
+                rsiValue=float(candle.rsiValue) if candle.rsiValue is not None else None,
+                stochRSIK=float(candle.stochRSIK) if candle.stochRSIK is not None else None,
+                stochRSID=float(candle.stochRSID) if candle.stochRSID is not None else None,
                 strategyType=BandTouchDefaults.STRATEGY_TYPE,
                 signalType=BandTouchFields.SIGNAL_TYPE,
                 dexScreenerUrl=BandTouchUrls.DEXSCREENER_BASE.format(tokenAddress=trackedToken.tokenAddress)

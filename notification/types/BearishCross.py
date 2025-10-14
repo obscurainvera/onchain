@@ -1,17 +1,17 @@
 """
-Bullish Cross notification type
+Bearish Cross notification type
 """
 from dataclasses import dataclass
 from typing import Optional, List
 from notification.MessageFormat import CommonMessage, MessageButton
 
 
-class BullishCross:
-    """Bullish Cross notification - when a shorter MA crosses above a longer MA"""
+class BearishCross:
+    """Bearish Cross notification - when a shorter MA crosses below a longer MA"""
     
     @dataclass
     class Data:
-        """POJO for bullish cross notification data"""
+        """POJO for bearish cross notification data"""
         symbol: str
         tokenAddress: str
         shortMa: int  # e.g., 21
@@ -30,12 +30,11 @@ class BullishCross:
     
     @staticmethod
     def formatMessage(data: Data) -> CommonMessage:
-        """Format bullish cross data into common message for Telegram"""
+        """Format bearish cross data into common message for Telegram"""
         
-        # Create the formatted message
-        formatted = f"<b>Bullish Cross Alert - EMA{data.shortMa} >> EMA{data.longMa}</b>\n\n"
+        formatted = f"<b>Bearish Cross Alert - EMA{data.longMa} >> EMA{data.shortMa}</b>\n\n"
         formatted += f"<b> - Symbol:</b> {data.symbol}\n"
-        formatted += f"<b> - Signal:</b> EMA{data.shortMa} crossed above EMA{data.longMa}\n"
+        formatted += f"<b> - Signal:</b> EMA{data.shortMa} crossed below EMA{data.longMa}\n"
         formatted += f"<b> - Timeframe:</b> {data.timeframe}\n"
         formatted += f"<b> - Current Price:</b> ${data.currentPrice:,.6f}\n"
         formatted += f"<b> - Time:</b> {data.time}\n"
@@ -54,7 +53,6 @@ class BullishCross:
         
         formatted += f"\n<b> - Token Address:</b>\n<code>{data.tokenAddress}</code>\n"
         
-        # Create buttons
         buttons = []
         if data.dexScreenerUrl:
             buttons.append(MessageButton("DexScreener", data.dexScreenerUrl))
@@ -62,6 +60,7 @@ class BullishCross:
         return CommonMessage(
             formattedMessage=formatted,
             tokenId=data.tokenAddress,
-            strategyType=data.strategyType or f"Bullish Cross MA{data.shortMa}/MA{data.longMa}",
+            strategyType=data.strategyType or f"Bearish Cross MA{data.shortMa}/MA{data.longMa}",
             buttons=buttons if buttons else None
         )
+
