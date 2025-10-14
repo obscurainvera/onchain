@@ -1,28 +1,27 @@
 """
-Bullish Cross notification type
+AVWAP Breakout notification type
 """
 from dataclasses import dataclass
 from typing import Optional, List
 from notification.MessageFormat import CommonMessage, MessageButton
 
 
-class BullishCross:
-    """Bullish Cross notification - when a shorter MA crosses above a longer MA"""
+class AVWAPBreakout:
+    """AVWAP Breakout notification - when price breaks above the Anchored VWAP"""
     
     @dataclass
     class Data:
-        """POJO for bullish cross notification data"""
+        """POJO for AVWAP breakout notification data"""
         symbol: str
         tokenAddress: str
-        shortMa: int  # e.g., 21
-        longMa: int   # e.g., 34
         timeframe: str  # e.g., "1h", "4h", "1d"
         currentPrice: float
-        unixTime: int
-        time: str
+        avwapValue: float
+        priceChangePercent: Optional[float] = None  # % above AVWAP
+        unixTime: int = 0
+        time: str = ""
         volume24h: Optional[float] = None
         marketCap: Optional[float] = None
-        priceChange24h: Optional[float] = None
         strategyType: Optional[str] = None
         dexScreenerUrl: Optional[str] = None
         tradingUrl: Optional[str] = None
@@ -30,16 +29,20 @@ class BullishCross:
     
     @staticmethod
     def formatMessage(data: Data) -> CommonMessage:
-        """Format bullish cross data into common message for Telegram"""
+        """Format AVWAP breakout data into common message for Telegram"""
         
-        # Create the formatted message
-        formatted = f"<b>Bullish Cross Alert - EMA{data.shortMa} >> EMA{data.longMa}</b>\n\n"
+        priceChangePercent = ((data.currentPrice - data.avwapValue) / data.avwapValue) * 100 if data.avwapValue else 0
+        
+        formatted = f"<b>AVWAP Breakout Alert</b>\n\n"
         formatted += f"<b> - Symbol:</b> {data.symbol}\n"
-        formatted += f"<b> - Signal:</b> EMA{data.shortMa} crossed above EMA{data.longMa}\n"
+        formatted += f"<b> - Signal:</b> Price crossed above AVWAP\n"
         formatted += f"<b> - Timeframe:</b> {data.timeframe}\n"
-        formatted += f"<b> - Current Price:</b> ${data.currentPrice:,.6f}\n"
-        formatted += f"<b> - Time:</b> {data.time}\n"
-
+        formatted += f"<b> - Current Price:</b> ${data.currentPrice:,.8f}\n"
+        formatted += f"<b> - AVWAP Value:</b> ${data.avwapValue:,.8f}\n"
+        formatted += f"<b> - % diff:</b> +{priceChangePercent:.2f}%\n"
+        
+        if data.time:
+            formatted += f"<b> - Time:</b> {data.time}\n"
         
         if data.marketCap:
             if data.marketCap >= 1_000_000:
@@ -62,6 +65,7 @@ class BullishCross:
         return CommonMessage(
             formattedMessage=formatted,
             tokenId=data.tokenAddress,
-            strategyType=data.strategyType or f"Bullish Cross MA{data.shortMa}/MA{data.longMa}",
+            strategyType=data.strategyType or "AVWAP Breakout Strategy",
             buttons=buttons if buttons else None
         )
+

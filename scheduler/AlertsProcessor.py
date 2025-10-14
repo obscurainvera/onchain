@@ -16,8 +16,14 @@ from api.trading.request import Alert, TrendType
 from utils.CommonUtil import CommonUtil
 from scheduler.AlertsProcessorTypes import BandInfo, PriceInterval, IntervalType, BandType, PositionType
 from notification.handlers.BullishCrossNotification import BullishCrossNotification
+from notification.handlers.BearishCrossNotification import BearishCrossNotification
 from notification.handlers.BandTouchNotification import BandTouchNotification
+from notification.handlers.AVWAPBreakoutNotification import AVWAPBreakoutNotification
+from notification.handlers.AVWAPBreakdownNotification import AVWAPBreakdownNotification
+from notification.handlers.StochRSIOversoldNotification import StochRSIOversoldNotification
+from notification.handlers.StochRSIOverboughtNotification import StochRSIOverboughtNotification
 from config.AVWAPPricePositionEnum import AVWAPPricePosition
+from constants.BullishCrossConstants import StochRSIOversoldDefaults, StochRSIOverboughtDefaults
 
 if TYPE_CHECKING:
     from database.trading.TradingHandler import TradingHandler
@@ -57,16 +63,17 @@ class AlertsProcessor:
         # Process EMA 21/34 notifications (default)
         if trendType == 'ema23' and previousTrend and currentTrend:
             if existingAlert.isBullishCross(previousTrend, currentTrend):
-                # Bullish cross detected - send notification
+                # Bullish cross detected - send notification (EMA 21/34)
                 existingAlert.latestTouchUnix = candle.unixTime
                 existingAlert.touchCount = 0
-                logger.info(f"Bullish cross detected for {tokenAddress} {timeframeRecord.timeframe}")
-                self.sendBullishCrossNotification(ChatCredentials.BULLISH_CROSS_CHAT, trackedToken, timeframeRecord, candle)
+                logger.info(f"Bullish cross detected for {tokenAddress} {timeframeRecord.timeframe} (EMA 21/34)")
+                self.sendBullishCrossNotification(ChatCredentials.BULLISH_CROSS_CHAT, trackedToken, timeframeRecord, candle, 21, 34)
             
             elif existingAlert.isBearishCross(previousTrend, currentTrend):
-                # Bearish cross detected
+                # Bearish cross detected - send notification (EMA 21/34)
                 existingAlert.resetTouch()
-                logger.info(f"Bearish cross detected for {tokenAddress} {timeframeRecord.timeframe}")
+                logger.info(f"Bearish cross detected for {tokenAddress} {timeframeRecord.timeframe} (EMA 21/34)")
+                self.sendBearishCrossNotification(ChatCredentials.BEARISH_CROSS_CHAT, trackedToken, timeframeRecord, candle, 21, 34)
             
             elif currentTrend == TrendType.BULLISH.value and previousTrend != TrendType.BEARISH.value:
                 # Check for EMA touches during bullish trend
@@ -74,7 +81,7 @@ class AlertsProcessor:
                     existingAlert.recordTouch(candle.unixTime)
                     logger.info(f"EMA touch recorded for {tokenAddress} {timeframeRecord.timeframe}")
                     # Send band touch notification (only for first and second touches)
-                    self.sendBandTouchNotification(ChatCredentials.BAND_TOUCH_CHAT.value, trackedToken, timeframeRecord, candle, existingAlert)
+                    self.sendBandTouchNotification(ChatCredentials.BAND_TOUCH_CHAT.value, trackedToken, timeframeRecord, candle, existingAlert, 'EMA21', 'EMA34')
         
         # Process EMA 12/21 notifications
         elif trendType == 'ema12' and previousTrend12 and currentTrend12:
@@ -83,19 +90,20 @@ class AlertsProcessor:
                 existingAlert.latestTouchUnix12 = candle.unixTime
                 existingAlert.touchCount12 = 0
                 logger.info(f"EMA 12/21 Bullish cross detected for {tokenAddress} {timeframeRecord.timeframe}")
-                self.sendBullishCrossNotification(ChatCredentials.BULLISH_CROSS_CHAT, trackedToken, timeframeRecord, candle)
+                self.sendBullishCrossNotification(ChatCredentials.BULLISH_CROSS_CHAT, trackedToken, timeframeRecord, candle, 12, 21)
             
             elif existingAlert.isBearishCross(previousTrend12, currentTrend12):
-                # Bearish cross detected for EMA 12/21
+                # Bearish cross detected for EMA 12/21 - send notification
                 existingAlert.resetTouch12()
                 logger.info(f"EMA 12/21 Bearish cross detected for {tokenAddress} {timeframeRecord.timeframe}")
+                self.sendBearishCrossNotification(ChatCredentials.BEARISH_CROSS_CHAT, trackedToken, timeframeRecord, candle, 12, 21)
             
             elif currentTrend12 == TrendType.BULLISH.value and previousTrend12 != TrendType.BEARISH.value:
                 # Check for EMA 12/21 touches during bullish trend
                 if self.isEMATouched(candle) and existingAlert.shouldRecordTouch(candle.unixTime, self.TOUCH_THRESHOLD_SECONDS):
                     existingAlert.recordTouch12(candle.unixTime)
                     logger.info(f"EMA 12/21 touch recorded for {tokenAddress} {timeframeRecord.timeframe}")
-                    self.sendBandTouchNotification(ChatCredentials.BAND_TOUCH_CHAT.value, trackedToken, timeframeRecord, candle, existingAlert)
+                    self.sendBandTouchNotification(ChatCredentials.BAND_TOUCH_CHAT.value, trackedToken, timeframeRecord, candle, existingAlert, 'EMA12', 'EMA21')
     
     def processAVWAPBreakoutAlert(self, existingAlert: 'Alert', candle: 'OHLCVDetails',
                                   trackedToken: 'TrackedToken', timeframeRecord: 'TimeframeRecord') -> None:
@@ -126,17 +134,200 @@ class AlertsProcessor:
                 existingAlert.markPriceAboveAVWAP()
                 logger.info(f"✓ AVWAP Breakout detected for {trackedToken.tokenAddress} {timeframeRecord.timeframe}: "
                            f"Close={closePrice:.8f}, AVWAP={avwapValue:.8f}")
-                # TODO: Implement AVWAP breakout notification handler
-                # self.sendAVWAPBreakoutNotification(ChatCredentials.AVWAP_BREAKOUT_CHAT, trackedToken, timeframeRecord, candle)
+                self.sendAVWAPBreakoutNotification(ChatCredentials.AVWAP_BREAKOUT_CHAT, trackedToken, timeframeRecord, candle)
             
             elif closePrice < avwapValue and existingAlert.avwapPricePosition == AVWAPPricePosition.ABOVE_AVWAP.positionCode:
-                # Price went back below AVWAP - reset flag
+                # Price went back below AVWAP - send breakdown alert and reset flag
                 existingAlert.markPriceBelowAVWAP()
-                logger.info(f"✓ Price moved below AVWAP for {trackedToken.tokenAddress} {timeframeRecord.timeframe}: "
-                           f"Close={closePrice:.8f}, AVWAP={avwapValue:.8f} - Reset breakout flag")
+                logger.info(f"✓ AVWAP Breakdown detected for {trackedToken.tokenAddress} {timeframeRecord.timeframe}: "
+                           f"Close={closePrice:.8f}, AVWAP={avwapValue:.8f}")
+                self.sendAVWAPBreakdownNotification(ChatCredentials.AVWAP_BREAKDOWN_CHAT, trackedToken, timeframeRecord, candle)
             
         except Exception as e:
             logger.error(f"✗ Error processing AVWAP breakout alert: {e}", exc_info=True)
+    
+    def processStochRSIOversoldAlert(self, candle: 'OHLCVDetails', 
+                                     currentTrend: str, trackedToken: 'TrackedToken', 
+                                     timeframeRecord: 'TimeframeRecord', 
+                                     shortEmaLabel: str, longEmaLabel: str) -> None:
+        """
+        Process Stochastic RSI oversold confluence alert
+        
+        Conditions:
+        1. Must be in bullish trend
+        2. Price must touch either short or long EMA
+        3. Both %K and %D must be below oversold thresholds
+        
+        Args:
+            candle: OHLCV candle with price and indicator data
+            currentTrend: Current trend for the EMA pair being checked
+            trackedToken: Token being tracked
+            timeframeRecord: Timeframe record
+            shortEmaLabel: Label for short EMA (e.g., "EMA12", "EMA21")
+            longEmaLabel: Label for long EMA (e.g., "EMA21", "EMA34")
+        """
+        try:
+            # Condition 1: Must be in bullish trend
+            if currentTrend != TrendType.BULLISH.value:
+                return
+            
+            # Condition 3: Check if RSI indicators are available and oversold
+            if candle.stochRSIK is None or candle.stochRSID is None:
+                return
+            
+            kValue = float(candle.stochRSIK)
+            dValue = float(candle.stochRSID)
+            
+            # Check if both %K and %D are below thresholds
+            isOversold = (kValue < StochRSIOversoldDefaults.K_OVERSOLD_THRESHOLD and 
+                         dValue < StochRSIOversoldDefaults.D_OVERSOLD_THRESHOLD)
+            
+            if not isOversold:
+                return
+            
+            # Get EMA values from candle using labels
+            shortEmaValue = self.getEmaValueFromLabel(candle, shortEmaLabel)
+            longEmaValue = self.getEmaValueFromLabel(candle, longEmaLabel)
+            
+            # Condition 2: Check if price touched either band
+            lowPrice = float(candle.lowPrice)
+            highPrice = float(candle.highPrice)
+            
+            touchedBand = None
+            bandValue = None
+            
+            # Check short EMA touch
+            if shortEmaValue is not None:
+                if self.didPriceTouch(lowPrice, highPrice, shortEmaValue):
+                    touchedBand = shortEmaLabel
+                    bandValue = shortEmaValue
+            
+            # Check long EMA touch (if short EMA wasn't touched)
+            if touchedBand is None and longEmaValue is not None:
+                if self.didPriceTouch(lowPrice, highPrice, longEmaValue):
+                    touchedBand = longEmaLabel
+                    bandValue = longEmaValue
+            
+            if touchedBand is None:
+                return
+            
+            # All 3 conditions met - send alert!
+            logger.info(f"✓ Stochastic RSI Oversold Setup detected for {trackedToken.tokenAddress} {timeframeRecord.timeframe}: "
+                       f"Trend=BULLISH, Touched={touchedBand}, K={kValue:.2f}, D={dValue:.2f}")
+            self.sendStochRSIOversoldNotification(
+                ChatCredentials.STOCH_RSI_OVERSOLD_CHAT, 
+                trackedToken, 
+                timeframeRecord, 
+                candle, 
+                touchedBand, 
+                bandValue,
+                shortEmaLabel,
+                longEmaLabel
+            )
+            
+        except Exception as e:
+            logger.error(f"✗ Error processing Stochastic RSI oversold alert: {e}", exc_info=True)
+    
+    def processStochRSIOverboughtAlert(self, candle: 'OHLCVDetails', 
+                                       currentTrend: str, trackedToken: 'TrackedToken', 
+                                       timeframeRecord: 'TimeframeRecord', 
+                                       shortEmaLabel: str, longEmaLabel: str) -> None:
+        """
+        Process Stochastic RSI overbought confluence alert
+        
+        Conditions:
+        1. Must be in bullish trend
+        2. Price must touch either short or long EMA
+        3. Both %K and %D must be above overbought thresholds
+        
+        Args:
+            candle: OHLCV candle with price and indicator data
+            currentTrend: Current trend for the EMA pair being checked
+            trackedToken: Token being tracked
+            timeframeRecord: Timeframe record
+            shortEmaLabel: Label for short EMA (e.g., "EMA12", "EMA21")
+            longEmaLabel: Label for long EMA (e.g., "EMA21", "EMA34")
+        """
+        try:
+            # Condition 1: Must be in bullish trend
+            if currentTrend != TrendType.BULLISH.value:
+                return
+            
+            # Condition 3: Check if RSI indicators are available and overbought
+            if candle.stochRSIK is None or candle.stochRSID is None:
+                return
+            
+            kValue = float(candle.stochRSIK)
+            dValue = float(candle.stochRSID)
+            
+            # Check if both %K and %D are above thresholds
+            isOverbought = (kValue > StochRSIOverboughtDefaults.K_OVERBOUGHT_THRESHOLD and 
+                           dValue > StochRSIOverboughtDefaults.D_OVERBOUGHT_THRESHOLD)
+            
+            if not isOverbought:
+                return
+            
+            # Get EMA values from candle using labels
+            shortEmaValue = self.getEmaValueFromLabel(candle, shortEmaLabel)
+            longEmaValue = self.getEmaValueFromLabel(candle, longEmaLabel)
+            
+            # Condition 2: Check if price touched either band
+            lowPrice = float(candle.lowPrice)
+            highPrice = float(candle.highPrice)
+            
+            touchedBand = None
+            bandValue = None
+            
+            # Check short EMA touch
+            if shortEmaValue is not None:
+                if self.didPriceTouch(lowPrice, highPrice, shortEmaValue):
+                    touchedBand = shortEmaLabel
+                    bandValue = shortEmaValue
+            
+            # Check long EMA touch (if short EMA wasn't touched)
+            if touchedBand is None and longEmaValue is not None:
+                if self.didPriceTouch(lowPrice, highPrice, longEmaValue):
+                    touchedBand = longEmaLabel
+                    bandValue = longEmaValue
+            
+            if touchedBand is None:
+                return
+            
+            # All 3 conditions met - send alert!
+            logger.info(f"✓ Stochastic RSI Overbought Setup detected for {trackedToken.tokenAddress} {timeframeRecord.timeframe}: "
+                       f"Trend=BULLISH, Touched={touchedBand}, K={kValue:.2f}, D={dValue:.2f}")
+            self.sendStochRSIOverboughtNotification(
+                ChatCredentials.STOCH_RSI_OVERBOUGHT_CHAT, 
+                trackedToken, 
+                timeframeRecord, 
+                candle, 
+                touchedBand, 
+                bandValue,
+                "BULLISH",
+                shortEmaLabel,
+                longEmaLabel
+            )
+            
+        except Exception as e:
+            logger.error(f"✗ Error processing Stochastic RSI overbought alert: {e}", exc_info=True)
+    
+    def getEmaValueFromLabel(self, candle: 'OHLCVDetails', emaLabel: str) -> Optional[float]:
+        """
+        Get EMA value from candle using EMA label
+        
+        Args:
+            candle: OHLCV candle with EMA values
+            emaLabel: EMA label like "EMA12", "EMA21", "EMA34"
+            
+        Returns:
+            EMA value or None if not available
+        """
+        emaMap = {
+            'EMA12': candle.ema12Value,
+            'EMA21': candle.ema21Value,
+            'EMA34': candle.ema34Value
+        }
+        return emaMap.get(emaLabel)
 
     def calculateStatus(self, candle: 'OHLCVDetails', emaFastValue: Optional[float] = None, emaSlowValue: Optional[float] = None, 
                        emaFastLabel: str = 'EMA21', emaSlowLabel: str = 'EMA34') -> str:
@@ -275,17 +466,47 @@ class AlertsProcessor:
     def didPriceTouch(self, lowPrice: float, highPrice: float, bandValue: float) -> bool:
         return lowPrice <= bandValue <= highPrice
     
-    def sendBullishCrossNotification(self, chatName: str, trackedToken: 'TrackedToken', timeframeRecord: 'TimeframeRecord', candle: 'OHLCVDetails') -> None:
+    def sendBullishCrossNotification(self, chatName: str, trackedToken: 'TrackedToken', timeframeRecord: 'TimeframeRecord', candle: 'OHLCVDetails', shortMa: int, longMa: int) -> None:
         try:
-            BullishCrossNotification.sendAlert(chatName, trackedToken, timeframeRecord, candle)                
+            BullishCrossNotification.sendAlert(chatName, trackedToken, timeframeRecord, candle, shortMa, longMa)                
         except Exception as e:
             logger.error(f"Error in sendBullishCrossNotification for {trackedToken.symbol}: {e}")
     
-    def sendBandTouchNotification(self, chatName: str, trackedToken: 'TrackedToken', timeframeRecord: 'TimeframeRecord', candle: 'OHLCVDetails', alert: 'Alert') -> None:
+    def sendBearishCrossNotification(self, chatName: str, trackedToken: 'TrackedToken', timeframeRecord: 'TimeframeRecord', candle: 'OHLCVDetails', shortMa: int, longMa: int) -> None:
         try:
-            BandTouchNotification.sendAlert(chatName, trackedToken, timeframeRecord, candle, alert)                
+            BearishCrossNotification.sendAlert(chatName, trackedToken, timeframeRecord, candle, shortMa, longMa)                
+        except Exception as e:
+            logger.error(f"Error in sendBearishCrossNotification for {trackedToken.symbol}: {e}")
+    
+    def sendBandTouchNotification(self, chatName: str, trackedToken: 'TrackedToken', timeframeRecord: 'TimeframeRecord', candle: 'OHLCVDetails', alert: 'Alert', shortEmaLabel: str, longEmaLabel: str) -> None:
+        try:
+            BandTouchNotification.sendAlert(chatName, trackedToken, timeframeRecord, candle, alert, shortEmaLabel, longEmaLabel)                
         except Exception as e:
             logger.error(f"Error in sendBandTouchNotification for {trackedToken.symbol}: {e}")
+    
+    def sendAVWAPBreakoutNotification(self, chatName: str, trackedToken: 'TrackedToken', timeframeRecord: 'TimeframeRecord', candle: 'OHLCVDetails') -> None:
+        try:
+            AVWAPBreakoutNotification.sendAlert(chatName, trackedToken, timeframeRecord, candle)                
+        except Exception as e:
+            logger.error(f"Error in sendAVWAPBreakoutNotification for {trackedToken.symbol}: {e}")
+    
+    def sendAVWAPBreakdownNotification(self, chatName: str, trackedToken: 'TrackedToken', timeframeRecord: 'TimeframeRecord', candle: 'OHLCVDetails') -> None:
+        try:
+            AVWAPBreakdownNotification.sendAlert(chatName, trackedToken, timeframeRecord, candle)                
+        except Exception as e:
+            logger.error(f"Error in sendAVWAPBreakdownNotification for {trackedToken.symbol}: {e}")
+    
+    def sendStochRSIOversoldNotification(self, chatName: str, trackedToken: 'TrackedToken', timeframeRecord: 'TimeframeRecord', candle: 'OHLCVDetails', touchedBand: str, bandValue: float, shortEmaLabel: str, longEmaLabel: str) -> None:
+        try:
+            StochRSIOversoldNotification.sendAlert(chatName, trackedToken, timeframeRecord, candle, touchedBand, bandValue, shortEmaLabel, longEmaLabel)                
+        except Exception as e:
+            logger.error(f"Error in sendStochRSIOversoldNotification for {trackedToken.symbol}: {e}")
+    
+    def sendStochRSIOverboughtNotification(self, chatName: str, trackedToken: 'TrackedToken', timeframeRecord: 'TimeframeRecord', candle: 'OHLCVDetails', touchedBand: str, bandValue: float, trend: str, shortEmaLabel: str, longEmaLabel: str) -> None:
+        try:
+            StochRSIOverboughtNotification.sendAlert(chatName, trackedToken, timeframeRecord, candle, touchedBand, bandValue, trend, shortEmaLabel, longEmaLabel)                
+        except Exception as e:
+            logger.error(f"Error in sendStochRSIOverboughtNotification for {trackedToken.symbol}: {e}")
     
     
     def processAlertsForToken(self, trackedToken: 'TrackedToken') -> None:
@@ -342,9 +563,33 @@ class AlertsProcessor:
                     existingAlert, candle, previousTrend, currentTrend, 
                     previousTrend12, currentTrend12, trackedToken, timeframeRecord, 'ema12'
                 )
-                
+
                 # Process AVWAP breakout alert
                 self.processAVWAPBreakoutAlert(existingAlert, candle, trackedToken, timeframeRecord)
+                
+                # Process Stochastic RSI oversold confluence alert for EMA 21/34
+                self.processStochRSIOversoldAlert(
+                    candle, currentTrend, trackedToken, timeframeRecord,
+                    'EMA21', 'EMA34'
+                )
+                
+                # Process Stochastic RSI oversold confluence alert for EMA 12/21
+                self.processStochRSIOversoldAlert(
+                    candle, currentTrend12, trackedToken, timeframeRecord,
+                    'EMA12', 'EMA21'
+                )
+                
+                # Process Stochastic RSI overbought confluence alert for EMA 21/34
+                self.processStochRSIOverboughtAlert(
+                    candle, currentTrend, trackedToken, timeframeRecord,
+                    'EMA21', 'EMA34'
+                )
+                
+                # Process Stochastic RSI overbought confluence alert for EMA 12/21
+                self.processStochRSIOverboughtAlert(
+                    candle, currentTrend12, trackedToken, timeframeRecord,
+                    'EMA12', 'EMA21'
+                )
                 
                 # Update indicator values in alert
                 existingAlert.updateIndicatorValues(
