@@ -77,7 +77,7 @@ class AlertsProcessor:
             
             elif currentTrend == TrendType.BULLISH.value and previousTrend != TrendType.BEARISH.value:
                 # Check for EMA touches during bullish trend
-                if self.isEMATouched(candle) and existingAlert.shouldRecordTouch(candle.unixTime, self.TOUCH_THRESHOLD_SECONDS):
+                if self.isEMATouched(candle, 'EMA21', 'EMA34') and existingAlert.shouldRecordTouch(candle.unixTime, self.TOUCH_THRESHOLD_SECONDS):
                     existingAlert.recordTouch(candle.unixTime)
                     logger.info(f"EMA touch recorded for {tokenAddress} {timeframeRecord.timeframe}")
                     # Send band touch notification (only for first and second touches)
@@ -100,7 +100,7 @@ class AlertsProcessor:
             
             elif currentTrend12 == TrendType.BULLISH.value and previousTrend12 != TrendType.BEARISH.value:
                 # Check for EMA 12/21 touches during bullish trend
-                if self.isEMATouched(candle) and existingAlert.shouldRecordTouch(candle.unixTime, self.TOUCH_THRESHOLD_SECONDS):
+                if self.isEMATouched(candle, 'EMA12', 'EMA21') and existingAlert.shouldRecordTouch(candle.unixTime, self.TOUCH_THRESHOLD_SECONDS):
                     existingAlert.recordTouch12(candle.unixTime)
                     logger.info(f"EMA 12/21 touch recorded for {tokenAddress} {timeframeRecord.timeframe}")
                     self.sendBandTouchNotification(ChatCredentials.BAND_TOUCH_CHAT.value, trackedToken, timeframeRecord, candle, existingAlert, 'EMA12', 'EMA21')
@@ -646,17 +646,33 @@ class AlertsProcessor:
         
         return True
     
-    def isEMATouched(self, candle: 'OHLCVDetails') -> bool:
-        lowPrice = float(candle.lowPrice)
+    def isEMATouched(self, candle: 'OHLCVDetails', shortEmaLabel: str, longEmaLabel: str) -> bool:
+        """
+        Check if price touched either of the specified EMA bands
         
-        # Check EMA21 touch
-        if candle.ema21Value is not None:
-            if lowPrice <= float(candle.ema21Value):
+        Args:
+            candle: OHLCVDetails object containing price and EMA data
+            shortEmaLabel: Short EMA label (e.g., "EMA12", "EMA21")
+            longEmaLabel: Long EMA label (e.g., "EMA21", "EMA34")
+        
+        Returns:
+            bool: True if price touched either EMA band
+        """
+        lowPrice = float(candle.lowPrice)
+        highPrice = float(candle.highPrice)
+        
+        # Get EMA values using the helper method
+        shortEmaValue = self.getEmaValueFromLabel(candle, shortEmaLabel)
+        longEmaValue = self.getEmaValueFromLabel(candle, longEmaLabel)
+        
+        # Check if price touched short EMA
+        if shortEmaValue is not None:
+            if self.didPriceTouch(lowPrice, highPrice, shortEmaValue):
                 return True
         
-        # Check EMA34 touch
-        if candle.ema34Value is not None:
-            if lowPrice <= float(candle.ema34Value):
+        # Check if price touched long EMA
+        if longEmaValue is not None:
+            if self.didPriceTouch(lowPrice, highPrice, longEmaValue):
                 return True
         
         return False
