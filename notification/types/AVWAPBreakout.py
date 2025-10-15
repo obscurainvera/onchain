@@ -33,29 +33,23 @@ class AVWAPBreakout:
         
         priceChangePercent = ((data.currentPrice - data.avwapValue) / data.avwapValue) * 100 if data.avwapValue else 0
         
-        formatted = f"<b>AVWAP Breakout Alert</b>\n\n"
-        formatted += f"<b> - Symbol:</b> {data.symbol}\n"
-        formatted += f"<b> - Signal:</b> Price crossed above AVWAP\n"
-        formatted += f"<b> - Timeframe:</b> {data.timeframe}\n"
-        formatted += f"<b> - Current Price:</b> ${data.currentPrice:,.8f}\n"
-        formatted += f"<b> - AVWAP Value:</b> ${data.avwapValue:,.8f}\n"
-        formatted += f"<b> - % diff:</b> +{priceChangePercent:.2f}%\n"
-        
-        if data.time:
-            formatted += f"<b> - Time:</b> {data.time}\n"
-        
+        formatted = f"<b>{data.symbol} - {data.timeframe} - above avwap</b>\n\n"
+
         if data.marketCap:
             if data.marketCap >= 1_000_000:
-                formatted += f"<b> - Market Cap:</b> ${data.marketCap/1_000_000:.2f}M\n"
+                formatted += f"<b> - mc :</b> ${data.marketCap/1_000_000:.2f}M - <b>price :</b> ${data.currentPrice:,.6f}\n\n"
             elif data.marketCap >= 1_000:
-                formatted += f"<b> - Market Cap:</b> ${data.marketCap/1_000:.2f}K\n"
+                formatted += f"<b> - mc :</b> ${data.marketCap/1_000:.2f}K - <b>price:</b> ${data.currentPrice:,.6f}\n\n"
             else:
-                formatted += f"<b> - Market Cap:</b> ${data.marketCap:,.2f}\n"
+                formatted += f"<b> - mc :</b> ${data.marketCap:,.2f} - <b>price:</b> ${data.currentPrice:,.6f}\n\n"
+                
+        formatted += f"<b> - avwap :</b> ${data.avwapValue:,.8f}\n"
+        formatted += f"<b> - % diff:</b> +{priceChangePercent:.2f}%\n\n"
         
-        if data.strategyType:
-            formatted += f"<b> - Strategy:</b> {data.strategyType}\n"
-        
-        formatted += f"\n<b> - Token Address:</b>\n<code>{data.tokenAddress}</code>\n"
+        if data.time:
+            formatted += f"<b> - time:</b> {data.time}\n\n"
+    
+        formatted += f"\n<b> - ca :</b>\n<code>{data.tokenAddress}</code>\n"
         
         # Create buttons
         buttons = []

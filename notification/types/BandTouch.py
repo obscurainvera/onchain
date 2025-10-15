@@ -40,44 +40,37 @@ class BandTouch:
         """Format band touch data into common message for Telegram"""
         
         # Create the formatted message
-        formatted = f"<b>Band Touch Alert</b>\n\n"
-        formatted += f"<b> - Symbol:</b> {data.symbol}\n"
-        formatted += f"<b> - Signal:</b> {data.signalType or 'EMA Band Touch'}\n"
-        formatted += f"<b> - Touch Count:</b> #{data.touchCount}\n"
-        formatted += f"<b> - Timeframe:</b> {data.timeframe}\n"
-        formatted += f"<b> - Current Price:</b> ${data.currentPrice:,.6f}\n"
+        formatted = f"<b>{data.symbol} - {data.timeframe} - band touch</b>\n\n"
+        formatted += f"<b> - count :</b> #{data.touchCount}\n\n"
+
+        if data.marketCap:
+            if data.marketCap >= 1_000_000:
+                formatted += f"<b> - mc :</b> ${data.marketCap/1_000_000:.2f}M - <b>price :</b> ${data.currentPrice:,.6f}\n\n"
+            elif data.marketCap >= 1_000:
+                formatted += f"<b> - mc :</b> ${data.marketCap/1_000:.2f}K - <b>price:</b> ${data.currentPrice:,.6f}\n\n"
+            else:
+                formatted += f"<b> - mc :</b> ${data.marketCap:,.2f} - <b>price:</b> ${data.currentPrice:,.6f}\n\n"
         
         # Show EMA values with labels
         if data.emaShortValue is not None and data.emaShortLabel:
             formatted += f"<b> - {data.emaShortLabel}:</b> ${data.emaShortValue:,.6f}\n"
         
         if data.emaLongValue is not None and data.emaLongLabel:
-            formatted += f"<b> - {data.emaLongLabel}:</b> ${data.emaLongValue:,.6f}\n"
+            formatted += f"<b> - {data.emaLongLabel}:</b> ${data.emaLongValue:,.6f}\n\n"
         
         # Show RSI indicators
         if data.rsiValue is not None:
-            formatted += f"<b> - RSI:</b> {data.rsiValue:.2f}\n"
+            formatted += f"<b> - rsi:</b> {data.rsiValue:.2f}\n"
         
         if data.stochRSIK is not None:
-            formatted += f"<b> - %K:</b> {data.stochRSIK:.2f}\n"
+            formatted += f"<b> - %k:</b> {data.stochRSIK:.2f}\n"
         
         if data.stochRSID is not None:
-            formatted += f"<b> - %D:</b> {data.stochRSID:.2f}\n"
+            formatted += f"<b> - %d:</b> {data.stochRSID:.2f}\n\n"
         
-        formatted += f"<b> - Time:</b> {data.time}\n"
+        formatted += f"<b> - time:</b> {data.time}\n"
         
-        if data.marketCap:
-            if data.marketCap >= 1_000_000:
-                formatted += f"<b> - Market Cap:</b> ${data.marketCap/1_000_000:.2f}M\n"
-            elif data.marketCap >= 1_000:
-                formatted += f"<b> - Market Cap:</b> ${data.marketCap/1_000:.2f}K\n"
-            else:
-                formatted += f"<b> - Market Cap:</b> ${data.marketCap:,.2f}\n"
-        
-        if data.strategyType:
-            formatted += f"<b> - Strategy:</b> {data.strategyType}\n"
-        
-        formatted += f"\n<b> - Token Address:</b>\n<code>{data.tokenAddress}</code>\n"
+        formatted += f"\n<b> - ca :</b>\n<code>{data.tokenAddress}</code>\n"
         
         # Create buttons
         buttons = []

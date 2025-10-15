@@ -13,6 +13,7 @@ from notification.NotificationManager import NotificationService
 from notification.NotificationType import NotificationType
 from notification.types.BearishCross import BearishCross
 from api.trading.request import TrackedToken, TimeframeRecord, OHLCVDetails
+from actions.DexscrennerAction import DexScreenerAction
 
 logger = get_logger(__name__)
 
@@ -52,6 +53,16 @@ class BearishCrossNotification:
     @staticmethod
     def createBearishCrossData(trackedToken: 'TrackedToken', timeframeRecord: 'TimeframeRecord', 
                                candle: 'OHLCVDetails', shortMa: int, longMa: int) -> BearishCross.Data:
+        # Fetch market cap from DexScreener
+        marketCap = None
+        try:
+            dexScreener = DexScreenerAction()
+            tokenPrice = dexScreener.getTokenPrice(trackedToken.tokenAddress)
+            if tokenPrice:
+                marketCap = tokenPrice.marketCap
+        except Exception as e:
+            logger.warning(f"Failed to fetch market cap for {trackedToken.symbol}: {e}")
+        
         return BearishCross.Data(
             symbol=trackedToken.symbol,
             tokenAddress=trackedToken.tokenAddress,
@@ -61,6 +72,7 @@ class BearishCrossNotification:
             currentPrice=float(candle.closePrice),
             unixTime=candle.unixTime,
             time=NotificationUtil.formatUnixTime(candle.unixTime),
+            marketCap=marketCap,
             strategyType=BearishCrossDefaults.STRATEGY_TYPE,
             dexScreenerUrl=BearishCrossNotification.buildDexScreenerUrl(trackedToken.tokenAddress)
         )

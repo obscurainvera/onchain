@@ -43,42 +43,34 @@ class StochRSIOversold:
         """Format Stochastic RSI oversold data into common message for Telegram"""
         
         # Create the formatted message
-        formatted = f"<b>Stochastic RSI Oversold Setup Alert</b>\n\n"
-        formatted += f"<b> - Symbol:</b> {data.symbol}\n"
-        formatted += f"<b> - Trend:</b> {data.trend}\n"
-        formatted += f"<b> - Oversold:</b> %K={data.kValue:.2f}, %D={data.dValue:.2f}\n"
-        formatted += f"<b> - Timeframe:</b> {data.timeframe}\n"
-        formatted += f"<b> - Current Price:</b> ${data.currentPrice:,.8f}\n"
-        formatted += f"<b> - {data.touchedBand} Value:</b> ${data.bandValue:,.8f}\n"
-        
-        # Show EMA values with labels
-        if data.emaShortValue is not None and data.emaShortLabel:
-            formatted += f"<b> - {data.emaShortLabel} : </b> ${data.emaShortValue:,.6f}\n"
-        
-        if data.emaLongValue is not None and data.emaLongLabel:
-            formatted += f"<b> - {data.emaLongLabel} : </b> ${data.emaLongValue:,.6f}\n"
-        
-        if data.rsiValue is not None:
-            formatted += f"<b> - RSI:</b> {data.rsiValue:.2f}\n"
-        
-        formatted += f"<b> - %K Threshold:</b> {data.kThreshold:.0f} (K below = oversold)\n"
-        formatted += f"<b> - %D Threshold:</b> {data.dThreshold:.0f} (D below = oversold)\n"
-        
-        if data.time:
-            formatted += f"<b> - Time:</b> {data.time}\n"
-        
+        formatted = f"<b>{data.symbol} - {data.timeframe} - stoch rsi oversold</b>\n\n"
+
         if data.marketCap:
             if data.marketCap >= 1_000_000:
-                formatted += f"<b> - Market Cap:</b> ${data.marketCap/1_000_000:.2f}M\n"
+                formatted += f"<b> - mc :</b> ${data.marketCap/1_000_000:.2f}M - <b>price :</b> ${data.currentPrice:,.6f}\n\n"
             elif data.marketCap >= 1_000:
-                formatted += f"<b> - Market Cap:</b> ${data.marketCap/1_000:.2f}K\n"
+                formatted += f"<b> - mc :</b> ${data.marketCap/1_000:.2f}K - <b>price:</b> ${data.currentPrice:,.6f}\n\n"
             else:
-                formatted += f"<b> - Market Cap:</b> ${data.marketCap:,.2f}\n"
+                formatted += f"<b> - mc :</b> ${data.marketCap:,.2f} - <b>price:</b> ${data.currentPrice:,.6f}\n\n"
+
+
+        formatted += f"<b> - trend :</b> {data.trend}\n\n"
+
+        formatted += f"<b> - band touch :</b> price touched {data.touchedBand}\n\n"
+
+        formatted += f"<b> - oversold :</b>\n"
         
-        if data.strategyType:
-            formatted += f"<b> - Strategy:</b> {data.strategyType}\n"
+        if data.rsiValue is not None:
+            formatted += f"<b> - rsi:</b> {data.rsiValue:.2f}\n"
         
-        formatted += f"\n<b> - Token Address:</b>\n<code>{data.tokenAddress}</code>\n"
+        formatted += f"<b> - %k :</b> {data.kValue} - {data.kThreshold:.0f}\n"
+        formatted += f"<b> - %d :</b> {data.dValue} - {data.dThreshold:.0f}\n"
+        
+        if data.time:
+            formatted += f"<b> - time:</b> {data.time}\n"
+    
+    
+        formatted += f"\n<b> - ca :</b>\n<code>{data.tokenAddress}</code>\n"
         
         # Create buttons
         buttons = []
