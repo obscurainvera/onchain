@@ -13,6 +13,7 @@ from notification.NotificationManager import NotificationService
 from notification.NotificationType import NotificationType
 from notification.types.StochRSIOverbought import StochRSIOverbought
 from api.trading.request import TrackedToken, TimeframeRecord, OHLCVDetails
+from actions.DexscrennerAction import DexScreenerAction
 
 logger = get_logger(__name__)
 
@@ -22,7 +23,7 @@ class StochRSIOverboughtNotification:
     
     @staticmethod
     def sendAlert(chatName: str, trackedToken: 'TrackedToken', timeframeRecord: 'TimeframeRecord', 
-                  candle: 'OHLCVDetails', touchedBand: str, bandValue: float, trend: str, 
+                  candle: 'OHLCVDetails', touchedBand: str, bandValue: float, 
                   shortEmaLabel: str, longEmaLabel: str) -> bool:
         try:
             chatCredentials = NotificationUtil.getChatCredentials(chatName)
@@ -31,7 +32,7 @@ class StochRSIOverboughtNotification:
                 return False
             
             stochRSIOverboughtData = StochRSIOverboughtNotification.createStochRSIOverboughtData(
-                trackedToken, timeframeRecord, candle, touchedBand, bandValue, trend, shortEmaLabel, longEmaLabel
+                trackedToken, timeframeRecord, candle, touchedBand, bandValue, shortEmaLabel, longEmaLabel
             )
             
             commonMessage = StochRSIOverbought.formatMessage(stochRSIOverboughtData)
@@ -50,8 +51,31 @@ class StochRSIOverboughtNotification:
             return False
     
     @staticmethod
+    def _getTrendForEMACombination(candle: 'OHLCVDetails', shortEmaLabel: str, longEmaLabel: str) -> str:
+        """
+        Get the appropriate trend based on EMA combination being used
+        
+        Args:
+            candle: OHLCVDetails object containing trend data
+            shortEmaLabel: Short EMA label (e.g., "EMA12", "EMA21")
+            longEmaLabel: Long EMA label (e.g., "EMA21", "EMA34")
+            
+        Returns:
+            Trend string (BULLISH/BEARISH/NEUTRAL)
+        """
+        # For EMA12/EMA21 combination, use trend12
+        if shortEmaLabel == "EMA12" and longEmaLabel == "EMA21":
+            return candle.trend12 or "NEUTRAL"
+        # For EMA21/EMA34 combination, use trend
+        elif shortEmaLabel == "EMA21" and longEmaLabel == "EMA34":
+            return candle.trend or "NEUTRAL"
+        # Default fallback
+        else:
+            return candle.trend or "NEUTRAL"
+
+    @staticmethod
     def createStochRSIOverboughtData(trackedToken: 'TrackedToken', timeframeRecord: 'TimeframeRecord', 
-                                     candle: 'OHLCVDetails', touchedBand: str, bandValue: float, trend: str,
+                                     candle: 'OHLCVDetails', touchedBand: str, bandValue: float,
                                      shortEmaLabel: str, longEmaLabel: str) -> StochRSIOverbought.Data:
         # Get EMA values from candle
         emaMap = {
@@ -60,6 +84,19 @@ class StochRSIOverboughtNotification:
             'EMA34': candle.ema34Value
         }
         
+        # Get the appropriate trend based on EMA combination (override the passed trend parameter)
+        actualTrend = StochRSIOverboughtNotification._getTrendForEMACombination(candle, shortEmaLabel, longEmaLabel)
+        
+        # Fetch market cap from DexScreener
+        marketCap = None
+        try:
+            dexScreener = DexScreenerAction()
+            tokenPrice = dexScreener.getTokenPrice(trackedToken.tokenAddress)
+            if tokenPrice:
+                marketCap = tokenPrice.marketCap
+        except Exception as e:
+            logger.warning(f"Failed to fetch market cap for {trackedToken.symbol}: {e}")
+        
         return StochRSIOverbought.Data(
             symbol=trackedToken.symbol,
             tokenAddress=trackedToken.tokenAddress,
@@ -67,7 +104,7 @@ class StochRSIOverboughtNotification:
             currentPrice=float(candle.closePrice),
             touchedBand=touchedBand,
             bandValue=bandValue,
-            trend=trend,
+            trend=actualTrend,
             kValue=float(candle.stochRSIK) if candle.stochRSIK is not None else 0.0,
             dValue=float(candle.stochRSID) if candle.stochRSID is not None else 0.0,
             emaShortValue=float(emaMap.get(shortEmaLabel)) if emaMap.get(shortEmaLabel) is not None else None,
@@ -80,6 +117,7 @@ class StochRSIOverboughtNotification:
             dThreshold=StochRSIOverboughtDefaults.D_OVERBOUGHT_THRESHOLD,
             unixTime=candle.unixTime,
             time=NotificationUtil.formatUnixTime(candle.unixTime),
+            marketCap=marketCap,
             strategyType=StochRSIOverboughtDefaults.STRATEGY_TYPE,
             dexScreenerUrl=StochRSIOverboughtNotification.buildDexScreenerUrl(trackedToken.tokenAddress)
         )

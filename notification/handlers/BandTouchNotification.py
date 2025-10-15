@@ -13,6 +13,7 @@ from notification.types.BandTouch import BandTouch
 from notification.utils.NotificationUtil import NotificationUtil
 from constants.BullishCrossConstants import BandTouchDefaults, BandTouchUrls, BandTouchFields
 from database.auth.ChatCredentialsEnum import ChatCredentials
+from actions.DexscrennerAction import DexScreenerAction
 
 if TYPE_CHECKING:
     from api.trading.request import TrackedToken, TimeframeRecord, OHLCVDetails, Alert
@@ -25,6 +26,29 @@ class BandTouchNotification:
     Handles sending band touch notifications.
     All methods are static as they do not maintain any state.
     """
+    
+    @staticmethod
+    def _getTrendForEMACombination(candle: 'OHLCVDetails', shortEmaLabel: str, longEmaLabel: str) -> str:
+        """
+        Get the appropriate trend based on EMA combination being used
+        
+        Args:
+            candle: OHLCVDetails object containing trend data
+            shortEmaLabel: Short EMA label (e.g., "EMA12", "EMA21")
+            longEmaLabel: Long EMA label (e.g., "EMA21", "EMA34")
+            
+        Returns:
+            Trend string (BULLISH/BEARISH/NEUTRAL)
+        """
+        # For EMA12/EMA21 combination, use trend12
+        if shortEmaLabel == "EMA12" and longEmaLabel == "EMA21":
+            return candle.trend12 or "NEUTRAL"
+        # For EMA21/EMA34 combination, use trend
+        elif shortEmaLabel == "EMA21" and longEmaLabel == "EMA34":
+            return candle.trend or "NEUTRAL"
+        # Default fallback
+        else:
+            return candle.trend or "NEUTRAL"
 
     @staticmethod
     def sendAlert(chatName: str, trackedToken: 'TrackedToken', timeframeRecord: 'TimeframeRecord',
@@ -64,6 +88,16 @@ class BandTouchNotification:
             shortEmaValue = emaMap.get(shortEmaLabel)
             longEmaValue = emaMap.get(longEmaLabel)
 
+            # Fetch market cap from DexScreener
+            marketCap = None
+            try:
+                dexScreener = DexScreenerAction()
+                tokenPrice = dexScreener.getTokenPrice(trackedToken.tokenAddress)
+                if tokenPrice:
+                    marketCap = tokenPrice.marketCap
+            except Exception as e:
+                logger.warning(f"Failed to fetch market cap for {trackedToken.symbol}: {e}")
+
             bandTouchData = BandTouch.Data(
                 symbol=trackedToken.symbol,
                 tokenAddress=trackedToken.tokenAddress,
@@ -79,6 +113,7 @@ class BandTouchNotification:
                 rsiValue=float(candle.rsiValue) if candle.rsiValue is not None else None,
                 stochRSIK=float(candle.stochRSIK) if candle.stochRSIK is not None else None,
                 stochRSID=float(candle.stochRSID) if candle.stochRSID is not None else None,
+                marketCap=marketCap,
                 strategyType=BandTouchDefaults.STRATEGY_TYPE,
                 signalType=BandTouchFields.SIGNAL_TYPE,
                 dexScreenerUrl=BandTouchUrls.DEXSCREENER_BASE.format(tokenAddress=trackedToken.tokenAddress)

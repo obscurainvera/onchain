@@ -13,6 +13,7 @@ from notification.NotificationManager import NotificationService
 from notification.NotificationType import NotificationType
 from notification.types.StochRSIOversold import StochRSIOversold
 from api.trading.request import TrackedToken, TimeframeRecord, OHLCVDetails
+from actions.DexscrennerAction import DexScreenerAction
 
 logger = get_logger(__name__)
 
@@ -50,6 +51,29 @@ class StochRSIOversoldNotification:
             return False
     
     @staticmethod
+    def _getTrendForEMACombination(candle: 'OHLCVDetails', shortEmaLabel: str, longEmaLabel: str) -> str:
+        """
+        Get the appropriate trend based on EMA combination being used
+        
+        Args:
+            candle: OHLCVDetails object containing trend data
+            shortEmaLabel: Short EMA label (e.g., "EMA12", "EMA21")
+            longEmaLabel: Long EMA label (e.g., "EMA21", "EMA34")
+            
+        Returns:
+            Trend string (BULLISH/BEARISH/NEUTRAL)
+        """
+        # For EMA12/EMA21 combination, use trend12
+        if shortEmaLabel == "EMA12" and longEmaLabel == "EMA21":
+            return candle.trend12 
+        # For EMA21/EMA34 combination, use trend
+        elif shortEmaLabel == "EMA21" and longEmaLabel == "EMA34":
+            return candle.trend 
+        # Default fallback
+        else:
+            return "NEUTRAL"
+
+    @staticmethod
     def createStochRSIOversoldData(trackedToken: 'TrackedToken', timeframeRecord: 'TimeframeRecord', 
                                     candle: 'OHLCVDetails', touchedBand: str, bandValue: float,
                                     shortEmaLabel: str, longEmaLabel: str) -> StochRSIOversold.Data:
@@ -60,6 +84,19 @@ class StochRSIOversoldNotification:
             'EMA34': candle.ema34Value
         }
         
+        # Get the appropriate trend based on EMA combination
+        trend = StochRSIOversoldNotification._getTrendForEMACombination(candle, shortEmaLabel, longEmaLabel)
+        
+        # Fetch market cap from DexScreener
+        marketCap = None
+        try:
+            dexScreener = DexScreenerAction()
+            tokenPrice = dexScreener.getTokenPrice(trackedToken.tokenAddress)
+            if tokenPrice:
+                marketCap = tokenPrice.marketCap
+        except Exception as e:
+            logger.warning(f"Failed to fetch market cap for {trackedToken.symbol}: {e}")
+        
         return StochRSIOversold.Data(
             symbol=trackedToken.symbol,
             tokenAddress=trackedToken.tokenAddress,
@@ -67,7 +104,7 @@ class StochRSIOversoldNotification:
             currentPrice=float(candle.closePrice),
             touchedBand=touchedBand,
             bandValue=bandValue,
-            trend="BULLISH",
+            trend=trend,
             kValue=float(candle.stochRSIK) if candle.stochRSIK is not None else 0.0,
             dValue=float(candle.stochRSID) if candle.stochRSID is not None else 0.0,
             emaShortValue=float(emaMap.get(shortEmaLabel)) if emaMap.get(shortEmaLabel) is not None else None,
@@ -80,6 +117,7 @@ class StochRSIOversoldNotification:
             dThreshold=StochRSIOversoldDefaults.D_OVERSOLD_THRESHOLD,
             unixTime=candle.unixTime,
             time=NotificationUtil.formatUnixTime(candle.unixTime),
+            marketCap=marketCap,
             strategyType=StochRSIOversoldDefaults.STRATEGY_TYPE,
             dexScreenerUrl=StochRSIOversoldNotification.buildDexScreenerUrl(trackedToken.tokenAddress)
         )

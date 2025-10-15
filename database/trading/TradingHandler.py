@@ -2262,14 +2262,15 @@ class TradingHandler(BaseDBHandler):
                         tokenAddress,
                         pairAddress,
                         timeframe,
-                        'NEUTRAL'  # Initial trend
+                        'NEUTRAL', 
+                        'NEUTRAL'
                     ))
                 
                 cursor.executemany("""
                     INSERT INTO alerts 
-                    (tokenid, tokenaddress, pairaddress, timeframe, trend, 
+                    (tokenid, tokenaddress, pairaddress, timeframe, trend, trend12,
                      touchcount, createdat, lastupdatedat)
-                    VALUES (%s, %s, %s, %s, %s, 0, NOW(), NOW())
+                    VALUES (%s, %s, %s, %s, %s, %s, 0, NOW(), NOW())
                     ON CONFLICT (tokenaddress, timeframe) DO NOTHING
                 """, alertData)
                 

@@ -32,27 +32,21 @@ class BullishCross:
     def formatMessage(data: Data) -> CommonMessage:
         """Format bullish cross data into common message for Telegram"""
         
-        # Create the formatted message
-        formatted = f"<b>Bullish Cross Alert - EMA{data.shortMa} >> EMA{data.longMa}</b>\n\n"
-        formatted += f"<b> - Symbol:</b> {data.symbol}\n"
-        formatted += f"<b> - Signal:</b> EMA{data.shortMa} crossed above EMA{data.longMa}\n"
-        formatted += f"<b> - Timeframe:</b> {data.timeframe}\n"
-        formatted += f"<b> - Current Price:</b> ${data.currentPrice:,.6f}\n"
-        formatted += f"<b> - Time:</b> {data.time}\n"
+        formatted = f"<b>{data.symbol} - {data.timeframe} - bullish cross</b>\n\n"
+        formatted += f"<b> - {data.shortMa} >> {data.longMa}</b>\n\n"
+        formatted += f"<b> - time :</b> {data.time}\n\n"
 
         
         if data.marketCap:
             if data.marketCap >= 1_000_000:
-                formatted += f"<b> - Market Cap:</b> ${data.marketCap/1_000_000:.2f}M\n"
+                formatted += f"<b> - mc :</b> ${data.marketCap/1_000_000:.2f}M - <b>price :</b> ${data.currentPrice:,.6f}\n\n"
             elif data.marketCap >= 1_000:
-                formatted += f"<b> - Market Cap:</b> ${data.marketCap/1_000:.2f}K\n"
+                formatted += f"<b> - mc :</b> ${data.marketCap/1_000:.2f}K - <b>price:</b> ${data.currentPrice:,.6f}\n\n"
             else:
-                formatted += f"<b> - Market Cap:</b> ${data.marketCap:,.2f}\n"
+                formatted += f"<b> - mc :</b> ${data.marketCap:,.2f} - <b>price:</b> ${data.currentPrice:,.6f}\n\n"
+    
         
-        if data.strategyType:
-            formatted += f"<b> - Strategy:</b> {data.strategyType}\n"
-        
-        formatted += f"\n<b> - Token Address:</b>\n<code>{data.tokenAddress}</code>\n"
+        formatted += f"\n<b> - ca :</b>\n<code>{data.tokenAddress}</code>\n"
         
         # Create buttons
         buttons = []
@@ -62,6 +56,6 @@ class BullishCross:
         return CommonMessage(
             formattedMessage=formatted,
             tokenId=data.tokenAddress,
-            strategyType=data.strategyType or f"Bullish Cross MA{data.shortMa}/MA{data.longMa}",
+            strategyType=data.strategyType or f"bullish cross MA{data.shortMa}/MA{data.longMa}",
             buttons=buttons if buttons else None
         )

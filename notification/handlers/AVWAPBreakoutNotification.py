@@ -13,6 +13,7 @@ from notification.NotificationManager import NotificationService
 from notification.NotificationType import NotificationType
 from notification.types.AVWAPBreakout import AVWAPBreakout
 from api.trading.request import TrackedToken, TimeframeRecord, OHLCVDetails
+from actions.DexscrennerAction import DexScreenerAction
 
 logger = get_logger(__name__)
 
@@ -48,6 +49,16 @@ class AVWAPBreakoutNotification:
     @staticmethod
     def createAVWAPBreakoutData(trackedToken: 'TrackedToken', timeframeRecord: 'TimeframeRecord', 
                                 candle: 'OHLCVDetails') -> AVWAPBreakout.Data:
+        # Fetch market cap from DexScreener
+        marketCap = None
+        try:
+            dexScreener = DexScreenerAction()
+            tokenPrice = dexScreener.getTokenPrice(trackedToken.tokenAddress)
+            if tokenPrice:
+                marketCap = tokenPrice.marketCap
+        except Exception as e:
+            logger.warning(f"Failed to fetch market cap for {trackedToken.symbol}: {e}")
+        
         return AVWAPBreakout.Data(
             symbol=trackedToken.symbol,
             tokenAddress=trackedToken.tokenAddress,
@@ -56,6 +67,7 @@ class AVWAPBreakoutNotification:
             avwapValue=float(candle.avwapValue) if candle.avwapValue else 0.0,
             unixTime=candle.unixTime,
             time=NotificationUtil.formatUnixTime(candle.unixTime),
+            marketCap=marketCap,
             strategyType=AVWAPBreakoutDefaults.STRATEGY_TYPE,
             dexScreenerUrl=AVWAPBreakoutNotification.buildDexScreenerUrl(trackedToken.tokenAddress)
         )
