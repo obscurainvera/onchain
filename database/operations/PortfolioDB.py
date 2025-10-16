@@ -1,6 +1,5 @@
 from config.Config import get_config
 from database.operations.DatabaseConnectionManager import DatabaseConnectionManager     
-from database.job.job_handler import JobHandler
 from database.auth.TokenHandler import TokenHandler
 from database.auth.CredentialsHandler import CredentialsHandler
 from database.notification.NotificationHandler import NotificationHandler
