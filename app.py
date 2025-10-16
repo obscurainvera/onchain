@@ -33,7 +33,6 @@ from database.operations.PortfolioDB import PortfolioDB
 from database.operations.DatabaseConnectionManager import DatabaseConnectionManager
 from database.auth.CredentialsHandler import CredentialsHandler
 from database.auth.TokenHandler import TokenHandler
-from database.job.job_handler import JobHandler
 from database.notification.NotificationHandler import NotificationHandler
 from api.trading.TradingAPI import trading_bp
 from api.trading.DexScreenerAPI import dexscreener_bp
