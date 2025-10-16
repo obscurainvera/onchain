@@ -8,10 +8,6 @@ from actions.DexscrennerAction import DexScreenerAction
 from api.trading.request import AddTokenRequest, TokenInfo
 from api.trading.response import AddTokenResponse
 from api.trading.validation import TokenRequestValidator
-from constants.TradingHandlerConstants import TradingHandlerConstants
-import time
-
-from scheduler.CredentialResetScheduler import CredentialResetScheduler
 from scheduler.TradingScheduler import TradingScheduler
 
 logger = get_logger(__name__)

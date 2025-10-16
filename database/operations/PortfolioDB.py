@@ -81,7 +81,6 @@ class PortfolioDB:
 
         # Initialize handlers
         self._handlers = {
-            "job": JobHandler(self.conn_manager),
             "token": TokenHandler(self.conn_manager),
             "credentials": CredentialsHandler(self.conn_manager),
             "notification": NotificationHandler(self.conn_manager),
@@ -89,8 +88,6 @@ class PortfolioDB:
         }
 
         # Set direct properties for commonly used handlers for ease of access
-        
-        self.job = self._handlers["job"]
         self.token = self._handlers["token"]
         self.credentials = self._handlers["credentials"]
         self.notification = self._handlers["notification"]
@@ -239,24 +236,3 @@ class PortfolioDB:
         """
         self.close()
 
-    def get_handler(self, handler_type: str) -> Optional[Any]:
-        """
-        Get specific handler instance by type.
-
-        How to use:
-        portfolio_handler = db.get_handler('portfolio')
-
-        Args:
-            handler_type: Type of handler ('portfolio', 'token_analysis', 'jobs')
-
-        Returns:
-            Handler instance or None if not found
-        """
-        # Map logical handler names to actual handler keys
-        handler_mapping = {
-            "jobs": "job",
-            
-        }
-
-        handler_key = handler_mapping.get(handler_type, handler_type)
-        return self._handlers.get(handler_key)

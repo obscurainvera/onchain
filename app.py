@@ -40,52 +40,11 @@ from api.trading.DexScreenerAPI import dexscreener_bp
 logger = get_logger(__name__)
 
 def initialize_database():
-    """
-    Initialize all database tables for job tracking and application data in a centralized manner.
-    
-    Creates:
-    - Job tracking tables: `job_locks`, `job_executions`
-    - Application-specific tables via handlers
-    """
-    config_instance = get_config()
     try:
-        # Initialize job tracking tables
-        conn = psycopg2.connect(
-            user=config_instance.DB_USER,
-            password=config_instance.DB_PASSWORD,
-            host=config_instance.DB_HOST,
-            port=config_instance.DB_PORT,
-            dbname=config_instance.DB_NAME,
-            sslmode=config_instance.DB_SSLMODE,
-            gssencmode=config_instance.DB_GSSENCMODE
-        )
-        with conn.cursor() as cur:
-            cur.execute("""
-                CREATE TABLE IF NOT EXISTS job_locks (
-                    job_id TEXT PRIMARY KEY,
-                    locked_at TIMESTAMP NOT NULL,
-                    timeout INTEGER NOT NULL
-                )
-            """)
-            cur.execute("""
-                CREATE TABLE IF NOT EXISTS job_executions (
-                    id SERIAL PRIMARY KEY,
-                    job_id TEXT NOT NULL,
-                    start_time TIMESTAMP NOT NULL,
-                    end_time TIMESTAMP,
-                    status TEXT NOT NULL,
-                    error_message TEXT,
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-                )
-            """)
-        conn.commit()
-        conn.close()
-        logger.info("Job storage tables initialized successfully")
 
         # Initialize application-specific tables
         conn_manager = DatabaseConnectionManager()
         handlers = {
-            'JobHandler': JobHandler,
             'TokenHandler': TokenHandler,
             'CredentialsHandler': CredentialsHandler,
             'NotificationHandler': NotificationHandler,
