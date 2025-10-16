@@ -14,12 +14,9 @@ from config.SchedulerConfig import SCHEDULER_CONFIG
 from scheduler.TradingScheduler import TradingScheduler
 from scheduler.CredentialResetScheduler import CredentialResetScheduler
 from scheduler.PreventShutdownScheduler import PreventShutdownScheduler
-from database.operations.DatabaseConnectionManager import DatabaseConnectionManager
-from database.job.job_handler import JobHandler
 import time
 import requests
 from sqlalchemy.exc import OperationalError, SQLAlchemyError
-import threading
 
 
 logger = get_logger(__name__)
@@ -89,9 +86,6 @@ class JobRunner:
             if "jobstores" not in SCHEDULER_CONFIG:
                 self.scheduler.add_jobstore(SQLAlchemyJobStore(url=db_url), "default")
                 logger.info("Added SQLAlchemy job store")
-            self.scheduler.add_listener(
-                self._job_listener, EVENT_JOB_ERROR | EVENT_JOB_EXECUTED
-            )
             self.setup_jobs()
             logger.info("JobRunner initialized")
         except Exception as e:
@@ -129,70 +123,13 @@ class JobRunner:
             logger.info(f"Added job: {job_id}")
 
     def _job_listener(self, event):
-        """Log and record job execution events."""
+        """Log job execution events."""
         job_id = event.job_id
         if event.exception:
             logger.error(f"Job {job_id} failed: {event.exception}")
-            self._record_job_execution(job_id, "error", str(event.exception))
         else:
             logger.info(f"Job {job_id} succeeded")
-            self._record_job_execution(job_id, "success")
 
-    def _record_job_execution(self, job_id, status, error_message=None):
-        """
-        Record job execution status in the database.
-        Prevents recursion by using a simple flag to avoid nested calls.
-        """
-        # Use a thread-local storage instead of class attribute for recursion detection
-        thread_local = threading.local()
-
-        # Check if we're already inside this method for this thread
-        if hasattr(thread_local, "recording_job"):
-            # We're already recording a job execution, don't recurse
-            logger.warning(
-                f"Avoiding recursive call to _record_job_execution for job {job_id}"
-            )
-            return
-
-        try:
-            # Set flag to prevent recursion
-            thread_local.recording_job = True
-
-            # Create a connection manager that doesn't rely on the scheduler's connection
-            try:
-                # Create a fresh connection manager
-                conn_manager = DatabaseConnectionManager()
-
-                # Create a job handler directly with this connection
-                job_handler = JobHandler(conn_manager)
-
-                # Record the job execution
-                try:
-                    execution_id = job_handler.startJobExecution(job_id)
-                    job_handler.completeJobExecution(
-                        execution_id,
-                        "COMPLETED" if status == "success" else "FAILED",
-                        error_message,
-                    )
-                    logger.info(f"Recorded {status} for job {job_id}")
-                except Exception as e:
-                    logger.error(f"Error recording job execution details: {str(e)}")
-
-                # Ensure we properly close the connection
-                try:
-                    conn_manager.close()
-                except Exception as close_error:
-                    logger.error(
-                        f"Error closing connection manager: {str(close_error)}"
-                    )
-
-            except Exception as e:
-                logger.error(f"Failed to record job execution: {str(e)}")
-
-        finally:
-            # Always clean up the thread-local flag
-            if hasattr(thread_local, "recording_job"):
-                delattr(thread_local, "recording_job")
 
     def start(self):
         """Start the scheduler if not already running."""
