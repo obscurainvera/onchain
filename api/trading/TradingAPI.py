@@ -36,10 +36,13 @@ def addToken():
         return jsonify({}), 200
 
     try:
+        logger.info("TRADING API :: Add token request started")
+        
         # Step 1: Get and validate request data
         data = request.get_json()
         isValid, errorMessage = TokenRequestValidator.validateRequestData(data)
         if not isValid:
+            logger.warning(f"TRADING API :: Invalid request data: {errorMessage}")
             return jsonify(AddTokenResponse.error_response(errorMessage).to_dict()), 400
 
         # Step 2: Convert to POJO
@@ -58,6 +61,7 @@ def addToken():
         tokenInfoFromAPI = dexAction.getTokenPrice(addTokenRequest.tokenAddress)
         
         if not tokenInfoFromAPI:
+            logger.info(f"TRADING API :: Token not found on DexScreener: {addTokenRequest.tokenAddress}")
             return jsonify(AddTokenResponse.error_response(
                 'Token not found on DexScreener or no valid trading pairs available'
             ).to_dict()), 404
@@ -70,10 +74,12 @@ def addToken():
             price=tokenInfoFromAPI.price     
         )
 
-        logger.info(f"Processing token {tokenInfo.symbol} (age: {tokenInfo.pairAgeInDays:.1f} days)")
+        logger.info(f"TRADING API :: Processing started for token {tokenInfo.symbol} (age: {tokenInfo.pairAgeInDays:.1f} days)")
 
         tradingAction = TradingActionEnhanced(db)
         response = tradingAction.addTokenForTracking(addTokenRequest, tokenInfo)
+
+        logger.info(f"TRADING API :: Processing completed for token {tokenInfo.symbol}")
 
         if response.success:
             return jsonify(response.to_dict()), 201
@@ -81,7 +87,7 @@ def addToken():
             return jsonify(response.to_dict()), 500
 
     except Exception as e:
-        logger.error(f"Error in addToken API: {str(e)}", exc_info=True)
+        logger.error(f"TRADING API :: Error in addToken API: {str(e)}", exc_info=True)
         return jsonify(AddTokenResponse.error_response(
             f'Internal server error: {str(e)}'
         ).to_dict()), 500
@@ -103,8 +109,11 @@ def disableToken():
         return jsonify({}), 200
     
     try:
+        logger.info("TRADING API :: Disable token request started")
+        
         data = request.get_json()
         if not data:
+            logger.warning("TRADING API :: No JSON data provided for disable token")
             return jsonify({
                 'success': False,
                 'error': 'No JSON data provided'
@@ -117,13 +126,14 @@ def disableToken():
         
         # Validate required fields
         if not token_address:
+            logger.warning("TRADING API :: Missing tokenAddress in disable request")
             return jsonify({
                 'success': False,
                 'error': 'Missing required field: tokenAddress'
             }), 400
         
         # Disable the token using optimized database operation
-        logger.info(f"Disabling token: {token_address} - Reason: {reason}")
+        logger.info(f"TRADING API :: Disabling token: {token_address} - Reason: {reason}")
         
         result = trading_handler.disableToken(
             tokenAddress=token_address,
@@ -133,18 +143,20 @@ def disableToken():
         
         if not result['success']:
             if 'not found' in result['error'].lower():
+                logger.info(f"TRADING API :: Token not found or already disabled: {token_address}")
                 return jsonify({
                     'success': False,
                     'error': f'Token {token_address} not found or already disabled'
                 }), 404
             else:
+                logger.info(f"TRADING API :: Failed to disable token {token_address}: {result['error']}")
                 return jsonify({
                     'success': False,
                     'error': f'Failed to disable token: {result["error"]}'
                 }), 500
         
         token_info = result['tokenInfo']
-        logger.info(f"Successfully disabled token {token_info['symbol']} ({token_address})")
+        logger.info(f"TRADING API :: Successfully disabled token {token_info['symbol']} ({token_address})")
         
         return jsonify({
             'success': True,
@@ -157,7 +169,7 @@ def disableToken():
         }), 200
         
     except Exception as e:
-        logger.error(f"Error in disableToken API: {str(e)}", exc_info=True)
+        logger.info(f"TRADING API :: Error in disableToken API: {str(e)}", exc_info=True)
         return jsonify({
             'success': False,
             'error': f'Internal server error: {str(e)}'
@@ -180,8 +192,11 @@ def enableToken():
         return jsonify({}), 200
     
     try:
+        logger.info("TRADING API :: Enable token request started")
+        
         data = request.get_json()
         if not data:
+            logger.info("TRADING API :: No JSON data provided for enable token")
             return jsonify({
                 'success': False,
                 'error': 'No JSON data provided'
@@ -194,13 +209,14 @@ def enableToken():
         
         # Validate required fields
         if not token_address:
+            logger.info("TRADING API :: Missing tokenAddress in enable request")
             return jsonify({
                 'success': False,
                 'error': 'Missing required field: tokenAddress'
             }), 400
         
         # Enable the token using optimized database operation
-        logger.info(f"Enabling token: {token_address} - Reason: {reason}")
+        logger.info(f"TRADING API :: Enabling token: {token_address} - Reason: {reason}")
         
         result = trading_handler.enableToken(
             tokenAddress=token_address,
@@ -210,18 +226,20 @@ def enableToken():
         
         if not result['success']:
             if 'not found' in result['error'].lower():
+                logger.info(f"TRADING API :: Token not found or already enabled: {token_address}")
                 return jsonify({
                     'success': False,
                     'error': f'Token {token_address} not found or already enabled'
                 }), 404
             else:
+                logger.info(f"TRADING API :: Failed to enable token {token_address}: {result['error']}")
                 return jsonify({
                     'success': False,
                     'error': f'Failed to enable token: {result["error"]}'
                 }), 500
         
         token_info = result['tokenInfo']
-        logger.info(f"Successfully enabled token {token_info['symbol']} ({token_address})")
+        logger.info(f"TRADING API :: Successfully enabled token {token_info['symbol']} ({token_address})")
         
         return jsonify({
             'success': True,
@@ -234,7 +252,7 @@ def enableToken():
         }), 200
         
     except Exception as e:
-        logger.error(f"Error in enableToken API: {str(e)}", exc_info=True)
+        logger.error(f"TRADING API :: Error in enableToken API: {str(e)}", exc_info=True)
         return jsonify({
             'success': False,
             'error': f'Internal server error: {str(e)}'
@@ -255,33 +273,39 @@ def listTokens():
         return jsonify({}), 200
     
     try:
-        trading_scheduler = TradingScheduler()
-        trading_scheduler.handleTradingUpdatesFromJob()
+        logger.info("TRADING API :: List tokens request started")
+    
         
         status = request.args.get('status', 'active').lower()
         limit = int(request.args.get('limit', 100))
         offset = int(request.args.get('offset', 0))
+        
+        logger.info(f"TRADING API :: Listing tokens - status: {status}, limit: {limit}, offset: {offset}")
        
         # Validate parameters
         if status not in ['active', 'disabled', 'all']:
+            logger.warning(f"TRADING API :: Invalid status parameter: {status}")
             return jsonify({
                 'success': False,
                 'error': 'Invalid status. Must be "active", "disabled", or "all"'
             }), 400
        
         if limit < 1 or limit > 1000:
+            logger.warning(f"TRADING API :: Invalid limit parameter: {limit}")
             return jsonify({
                 'success': False,
                 'error': 'Limit must be between 1 and 1000'
             }), 400
        
         if offset < 0:
+            logger.warning(f"TRADING API :: Invalid offset parameter: {offset}")
             return jsonify({
                 'success': False,
                 'error': 'Offset must be non-negative'
             }), 400
        
         # Get tokens based on status
+        logger.info(f"TRADING API :: Fetching {status} tokens from database")
         if status == 'active':
             tokens = trading_handler.getActiveTokens()
         elif status == 'disabled':
@@ -294,6 +318,8 @@ def listTokens():
         # Apply pagination
         total_count = len(tokens)
         paginated_tokens = tokens[offset:offset + limit]
+        
+        logger.info(f"TRADING API :: Found {total_count} tokens, returning {len(paginated_tokens)} tokens")
        
         # Format response
         formatted_tokens = []
@@ -315,7 +341,8 @@ def listTokens():
                 'metadata': token['metadata']
             }
             formatted_tokens.append(formatted_token)
-       
+        
+        logger.info(f"TRADING API :: List tokens request completed successfully")
         return jsonify({
             'success': True,
             'tokens': formatted_tokens,
@@ -328,12 +355,13 @@ def listTokens():
         }), 200
        
     except ValueError as e:
+        logger.warning(f"TRADING API :: Invalid parameter in list tokens: {str(e)}")
         return jsonify({
             'success': False,
             'error': f'Invalid parameter: {str(e)}'
         }), 400
     except Exception as e:
-        logger.error(f"Error in listTokens API: {str(e)}", exc_info=True)
+        logger.error(f"TRADING API :: Error in listTokens API: {str(e)}", exc_info=True)
         return jsonify({
             'success': False,
             'error': f'Internal server error: {str(e)}'

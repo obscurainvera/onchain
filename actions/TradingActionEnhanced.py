@@ -69,9 +69,10 @@ class TradingActionEnhanced:
         )
         
         if not timeframeRecords:
+            logger.info(f"TRADING API :: Failed to create timeframe records for {tokenAddress} - token will be disabled")
             result = self.trading_handler.disableToken(tokenAddress, addedBy, "Failed to create timeframe records")
             if not result['success']:
-                logger.warning(f"Failed to disable token {tokenAddress} after timeframe creation failure: {result['error']}")
+                logger.info(f"TRADING API :: Failed to disable token {tokenAddress} after timeframe creation failure: {result['error']}")
             raise ValueError(ValidationMessages.FAILED_TIMEFRAME_RECORDS)
         
         return timeframeRecords
@@ -81,8 +82,6 @@ class TradingActionEnhanced:
 
     def addTokenForTracking(self, request: AddTokenRequest, tokenInfo: TokenInfo) -> AddTokenResponse:
         try:
-            logger.info(f"Adding token {tokenInfo.symbol} with optimized unified flow for timeframes: {request.timeframes}")
-            
             # Step 1: Add token to tracked tokens table
             tokenId = self.addTokenToTrackedTokensDatabase(
                 request.tokenAddress, request.pairAddress, tokenInfo.symbol, 
@@ -131,7 +130,7 @@ class TradingActionEnhanced:
             )
             
         except Exception as e:
-            logger.error(f"Error in unified token addition flow: {e}")
+            logger.error(f"TRADING API :: Error in unified token addition flow: {e}")
             return self.handleUnifiedTokenAdditionError(request.tokenAddress, request.addedBy, e)
     
     def fetchCandlesBasedOnNextFetchTime(self, tokenAddress: str, pairAddress: str, symbol: str,
@@ -149,7 +148,7 @@ class TradingActionEnhanced:
         for timeframeRecord in timeframeRecords:
             if timeframeRecord.shouldFetchFromAPI(currentTime):
                 # Fetch candles for this timeframe
-                logger.info(f"Fetching {timeframeRecord.timeframe} candles for {symbol} (nextFetchTime: {timeframeRecord.nextFetchAt} <= currentTime: {currentTime})")
+                logger.info(f"TRADING API :: Fetching candles for {symbol} - {timeframeRecord.timeframe} - started")
                 
                 try:
                     # Fetch candle data from API
@@ -191,15 +190,13 @@ class TradingActionEnhanced:
                         nextFetchTime = CommonUtil.calculateNextFetchTimeForTimeframe(candleResponse.latestTime, timeframeRecord.timeframe)
                         timeframeRecord.updateAfterFetch(candleResponse.latestTime, nextFetchTime)
                         
-                        logger.info(f"Fetched {len(timeframeRecord.ohlcvDetails)} {timeframeRecord.timeframe} candles for {symbol} (sorted by unixTime)")
+                        logger.info(f"TRADING API :: Fetched {len(timeframeRecord.ohlcvDetails)} candles for {symbol} - {timeframeRecord.timeframe}")
                     else:
-                        logger.warning(f"Failed to fetch {timeframeRecord.timeframe} data for {symbol}: {candleResponse.error}")
+                        logger.warning(f"TRADING API :: Failed to fetch {timeframeRecord.timeframe} data for {symbol}: {candleResponse.error}")
                         
                 except Exception as e:
-                    logger.error(f"Error fetching {timeframeRecord.timeframe} data for {symbol}: {e}")
-            else:
-                logger.info(f"Skipping {timeframeRecord.timeframe} fetch for {symbol} (nextFetchTime: {timeframeRecord.nextFetchAt} > currentTime: {currentTime})")
-            
+                    logger.error(f"TRADING API :: Error fetching {timeframeRecord.timeframe} data for {symbol}: {e}")
+                                 
             result[timeframeRecord.timeframe] = timeframeRecord
         
         return result
@@ -207,10 +204,10 @@ class TradingActionEnhanced:
     def calculateAllIndicatorsInMemory(self, candleDataByTimeframe: Dict[str, TimeframeRecord], 
                                      tokenAddress: str, pairAddress: str, pairCreatedTime: int):
         try:
-            logger.info(f"Calculating indicators in memory for {tokenAddress} across {len(candleDataByTimeframe)} timeframes")
+            logger.info(f"TRADING API :: Calculating indicators {tokenAddress} - started")
             
             for timeframe, timeframeRecord in candleDataByTimeframe.items():
-                logger.info(f"Processing indicators for {timeframe} timeframe")
+                logger.info(f"TRADING API :: Processing indicators for {tokenAddress} - {timeframe} - started")
                 
                 # Calculate VWAP
                 self.vwap_processor.calculateVWAPInMemory(timeframeRecord, tokenAddress, pairAddress)
@@ -223,12 +220,13 @@ class TradingActionEnhanced:
                 
                 # Calculate RSI
                 self.rsi_processor.calculateRSIInMemory(timeframeRecord, tokenAddress, pairAddress, pairCreatedTime)
+
+                logger.info(f"TRADING API :: Processing indicators for {tokenAddress} - {timeframe} - completed")
             
-            logger.info(f"Successfully calculated all indicators in memory for {tokenAddress}")
+            logger.info(f"TRADING API :: Calculating indicators {tokenAddress} - completed")
             
         except Exception as e:
-            logger.error(f"Error calculating indicators in memory for {tokenAddress}: {e}")
-            # Don't raise - indicators are supplementary, token addition should still succeed
+            logger.error(f"TRADING API :: Error calculating indicators {tokenAddress} - {e}")
     
     
     def updateCandleAndIndicatorData(self, candleDataByTimeframe: Dict[str, TimeframeRecord], maxCandlesPerTimeframe: int = 2) -> int:
@@ -237,15 +235,14 @@ class TradingActionEnhanced:
             timeframeRecords = list(candleDataByTimeframe.values())
             
             # Use the optimized batch method from TradingHandler with configurable candle limit
-            totalCandlesInserted = self.trading_handler.batchPersistOptimizedTokenData(
+            totalCandlesInserted = self.trading_handler.batchPersistCalculatedTokenData(
                 timeframeRecords, maxCandlesPerTimeframe
             )
             
-            logger.info(f"Persisted {totalCandlesInserted} candles (max {maxCandlesPerTimeframe} per timeframe) and all indicator data in single transaction")
             return totalCandlesInserted
             
         except Exception as e:
-            logger.error(f"Error persisting optimized data: {e}")
+            logger.error(f"TRADING API :: Error persisting optimized data: {e}")
             return 0
 
     
