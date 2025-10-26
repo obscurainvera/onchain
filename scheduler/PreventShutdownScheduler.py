@@ -9,19 +9,19 @@ class PreventShutdownScheduler:
     """Manages shutdown prevention by calling configured URLs"""
 
     def __init__(self):
-        logger.info("PreventShutdown scheduler initialized")
+        logger.info("PREVENT SHUTDOWN SCHEDULER :: PreventShutdown scheduler initialized")
 
     def callPreventShutdownUrl(self, url: str) -> bool:
         try:
             response = requests.get(url, timeout=10)
             if response.status_code == 200:
-                logger.debug(f"Successfully called prevent shutdown URL: {url}")
+                logger.info(f"PREVENT SHUTDOWN SCHEDULER :: Successfully called prevent shutdown URL: {url}")
                 return True
             else:
-                logger.warning(f"Failed to call URL {url}: HTTP {response.status_code}")
-                return False
+                logger.info(f"PREVENT SHUTDOWN SCHEDULER :: Failed to call URL {url}: HTTP {response.status_code}")
+                return False    
         except Exception as e:
-            logger.error(f"Error calling URL {url}: {e}")
+            logger.info(f"PREVENT SHUTDOWN SCHEDULER :: Error calling URL {url}: {e}")
             return False
 
     def handlePreventShutdownFromJob(self):
