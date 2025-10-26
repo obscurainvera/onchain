@@ -123,7 +123,7 @@ class RSIProcessor:
             logger.info(f"Processed RSI calculations for {totalProcessed} timeframe records")
         
         except Exception as e:
-            logger.error(f"Error processing RSI calculations: {e}", exc_info=True)
+            logger.info(f"Error processing RSI calculations: {e}", exc_info=True)
     
     def findRSICalculationType(self, status: int, lastFetchedAt: int, rsiAvailableAt: int) -> str:
         """
@@ -179,7 +179,7 @@ class RSIProcessor:
                 logger.warning(f"First RSI calculation failed for {tokenAddress} {timeframeRecord.timeframe}")
         
         except Exception as e:
-            logger.error(f"Error in first RSI calculation: {e}", exc_info=True)
+            logger.info(f"Error in first RSI calculation: {e}", exc_info=True)
     
     def performIncrementalRSIUpdate(self, timeframeRecord: 'TimeframeRecord',
                                     tokenAddress: str, pairAddress: str) -> None:
@@ -238,7 +238,7 @@ class RSIProcessor:
             logger.info(f"✓ Incremental RSI update completed for {tokenAddress} {timeframeRecord.timeframe}: processed {len(newCandles)} new candles")
         
         except Exception as e:
-            logger.error(f"✗ Error in incremental RSI update: {e}", exc_info=True)
+            logger.info(f"✗ Error in incremental RSI update: {e}", exc_info=True)
     
     def calculateFirstRSIFromCandles(self, timeframeRecord: 'TimeframeRecord',
                                      tokenAddress: str, pairAddress: str,
@@ -326,7 +326,7 @@ class RSIProcessor:
             return True
         
         except Exception as e:
-            logger.error(f"✗ Error in RSI calculation from candles: {e}", exc_info=True)
+            logger.info(f"✗ Error in RSI calculation from candles: {e}", exc_info=True)
             return False
     
     def calculateRSIInMemory(self, timeframeRecord: 'TimeframeRecord',
@@ -381,7 +381,7 @@ class RSIProcessor:
             logger.info(f"TRADING API :: Completed RSI calculation for {tokenAddress} - {timeframeRecord.timeframe}")
         
         except Exception as e:
-            logger.error(f"TRADING API :: Error calculating RSI in memory for {tokenAddress} - {timeframeRecord.timeframe}: {e}", exc_info=True)
+            logger.info(f"TRADING API :: Error calculating RSI in memory for {tokenAddress} - {timeframeRecord.timeframe}: {e}", exc_info=True)
     
     
     def processRSI(self, rsiState: 'RSIState', candle: 'OHLCVDetails', previousClose: float) -> None:

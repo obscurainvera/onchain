@@ -130,7 +130,7 @@ class TradingActionEnhanced:
             )
             
         except Exception as e:
-            logger.error(f"TRADING API :: Error in unified token addition flow: {e}")
+            logger.info(f"TRADING API :: Error in unified token addition flow: {e}")
             return self.handleUnifiedTokenAdditionError(request.tokenAddress, request.addedBy, e)
     
     def fetchCandlesBasedOnNextFetchTime(self, tokenAddress: str, pairAddress: str, symbol: str,
@@ -192,10 +192,10 @@ class TradingActionEnhanced:
                         
                         logger.info(f"TRADING API :: Fetched {len(timeframeRecord.ohlcvDetails)} candles for {symbol} - {timeframeRecord.timeframe}")
                     else:
-                        logger.warning(f"TRADING API :: Failed to fetch {timeframeRecord.timeframe} data for {symbol}: {candleResponse.error}")
+                        logger.info(f"TRADING API :: Failed to fetch {timeframeRecord.timeframe} data for {symbol}: {candleResponse.error}")
                         
                 except Exception as e:
-                    logger.error(f"TRADING API :: Error fetching {timeframeRecord.timeframe} data for {symbol}: {e}")
+                    logger.info(f"TRADING API :: Error fetching {timeframeRecord.timeframe} data for {symbol}: {e}")
                                  
             result[timeframeRecord.timeframe] = timeframeRecord
         
@@ -226,7 +226,7 @@ class TradingActionEnhanced:
             logger.info(f"TRADING API :: Calculating indicators {tokenAddress} - completed")
             
         except Exception as e:
-            logger.error(f"TRADING API :: Error calculating indicators {tokenAddress} - {e}")
+            logger.info(f"TRADING API :: Error calculating indicators {tokenAddress} - {e}")
     
     
     def updateCandleAndIndicatorData(self, candleDataByTimeframe: Dict[str, TimeframeRecord], maxCandlesPerTimeframe: int = 2) -> int:

@@ -87,7 +87,7 @@ def addToken():
             return jsonify(response.to_dict()), 500
 
     except Exception as e:
-        logger.error(f"TRADING API :: Error in addToken API: {str(e)}", exc_info=True)
+        logger.info(f"TRADING API :: Error in addToken API: {str(e)}", exc_info=True)
         return jsonify(AddTokenResponse.error_response(
             f'Internal server error: {str(e)}'
         ).to_dict()), 500
@@ -252,7 +252,7 @@ def enableToken():
         }), 200
         
     except Exception as e:
-        logger.error(f"TRADING API :: Error in enableToken API: {str(e)}", exc_info=True)
+        logger.info(f"TRADING API :: Error in enableToken API: {str(e)}", exc_info=True)
         return jsonify({
             'success': False,
             'error': f'Internal server error: {str(e)}'
@@ -361,7 +361,7 @@ def listTokens():
             'error': f'Invalid parameter: {str(e)}'
         }), 400
     except Exception as e:
-        logger.error(f"TRADING API :: Error in listTokens API: {str(e)}", exc_info=True)
+        logger.info(f"TRADING API :: Error in listTokens API: {str(e)}", exc_info=True)
         return jsonify({
             'success': False,
             'error': f'Internal server error: {str(e)}'

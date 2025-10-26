@@ -81,7 +81,7 @@ class TradingAPIUtil:
         except ValueError as e:
             return False, f"Invalid time format: {timeString}. Use formats like '10 AM', '14:30', or 'Today 2 PM'", None
         except Exception as e:
-            logger.error(f"Error parsing time string '{timeString}': {e}")
+            logger.info(f"Error parsing time string '{timeString}': {e}")
             return False, f"Failed to parse time: {str(e)}", None
 
     @staticmethod

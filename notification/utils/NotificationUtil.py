@@ -38,13 +38,13 @@ class NotificationUtil:
             # Get chat ID
             chatIdCredentials = credentialsHandler.getCredentialsByType(chatName, CredentialType.CHAT_ID.value)
             if not chatIdCredentials:
-                logger.error(f"No {CredentialType.CHAT_ID.value} found for {chatName}")
+                logger.info(f"No {CredentialType.CHAT_ID.value} found for {chatName}")
                 return None
             
             # Get API key (bot token)
             apiKeyCredentials = credentialsHandler.getCredentialsByType(chatName, CredentialType.API_KEY.value)
             if not apiKeyCredentials:
-                logger.error(f"No {CredentialType.API_KEY.value} found for {chatName}")
+                logger.info(f"No {CredentialType.API_KEY.value} found for {chatName}")
                 return None
             
             return {
@@ -54,7 +54,7 @@ class NotificationUtil:
             }
             
         except Exception as e:
-            logger.error(f"Error getting chat credentials for {chatName}: {e}")
+            logger.info(f"Error getting chat credentials for {chatName}: {e}")
             return None
     
     @staticmethod

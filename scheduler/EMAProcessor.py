@@ -128,7 +128,7 @@ class EMAProcessor:
                         totalProcessed += 1
         
         except Exception as e:
-            logger.error(f"Error processing EMA calculations with POJOs: {e}")
+            logger.info(f"Error processing EMA calculations with POJOs: {e}")
 
     def findEMACalculationType(self, status: int, lastFetchedAt: int, emaAvailableAt: int) -> str:
         """
@@ -178,7 +178,7 @@ class EMAProcessor:
                 logger.warning(f"First EMA{emaPeriod} calculation failed for {tokenAddress} {timeframeRecord.timeframe}")
             
         except Exception as e:
-            logger.error(f"Error in first EMA calculation with POJOs: {e}")
+            logger.info(f"Error in first EMA calculation with POJOs: {e}")
     
     def performIncrementalEMAUpdateWithPOJOs(self, timeframeRecord, emaPeriod: int, 
                                             tokenAddress: str, pairAddress: str, 
@@ -220,7 +220,7 @@ class EMAProcessor:
             logger.info(f"Incremental EMA{emaPeriod} update completed for {tokenAddress} {timeframeRecord.timeframe}: {currentEMAValue}")
             
         except Exception as e:
-            logger.error(f"Error in incremental EMA update with POJOs: {e}")
+            logger.info(f"Error in incremental EMA update with POJOs: {e}")
 
 
     def calculateEMAValue(self, previousEMA: float, currentPrice, period: int) -> float:
@@ -331,7 +331,7 @@ class EMAProcessor:
             return True
 
         except Exception as e:
-            logger.error(f"Error in shared EMA calculation: {e}")
+            logger.info(f"Error in shared EMA calculation: {e}")
             return False
 
 
@@ -397,6 +397,6 @@ class EMAProcessor:
             logger.info(f"TRADING API :: Completed EMA calculation for {tokenAddress} - {timeframeRecord.timeframe}")
             
         except Exception as e:
-            logger.error(f"TRADING API :: Error calculating EMA in memory for {tokenAddress} - {timeframeRecord.timeframe}: {e}")
+            logger.info(f"TRADING API :: Error calculating EMA in memory for {tokenAddress} - {timeframeRecord.timeframe}: {e}")
     
    

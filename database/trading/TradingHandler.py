@@ -56,7 +56,7 @@ class TradingHandler(BaseDBHandler):
                 self._createBasicTables(cursor)
                     
         except Exception as e:
-            logger.error(f"Error creating trading tables: {e}")
+            logger.info(f"Error creating trading tables: {e}")      
 
     def _createBasicTables(self, cursor):
         """Create basic tables if schema file is not available"""
@@ -325,7 +325,7 @@ class TradingHandler(BaseDBHandler):
                 return tokenId
                 
         except Exception as e:
-            logger.error(f"TRADING API :: Error adding token {symbol} - tracked token - {e}")
+            logger.info(f"TRADING API :: Error adding token {symbol} - tracked token - {e}")
             return None
 
     def disableToken(self, tokenAddress: str, disabledBy: str = None, reason: str = None) -> Dict[str, Any]:
@@ -379,7 +379,7 @@ class TradingHandler(BaseDBHandler):
                 }
                 
         except Exception as e:
-            logger.error(f"Error disabling token {tokenAddress}: {e}")
+            logger.info(f"Error disabling token {tokenAddress}: {e}")
             return {
                 'success': False,
                 'error': str(e),
@@ -437,7 +437,7 @@ class TradingHandler(BaseDBHandler):
                 }
                 
         except Exception as e:
-            logger.error(f"Error enabling token {tokenAddress}: {e}")
+            logger.info(f"Error enabling token {tokenAddress}: {e}")
             return {
                 'success': False,
                 'error': str(e),
@@ -462,7 +462,7 @@ class TradingHandler(BaseDBHandler):
                 results = cursor.fetchall()
                 return [dict(row) for row in results]
         except Exception as e:
-            logger.error(f"Error getting active tokens: {e}")
+            logger.info(f"Error getting active tokens: {e}")
             return []
 
     def getDisabledTokens(self) -> List[Dict]:
@@ -483,7 +483,7 @@ class TradingHandler(BaseDBHandler):
                 results = cursor.fetchall()
                 return [dict(row) for row in results]
         except Exception as e:
-            logger.error(f"Error getting disabled tokens: {e}")
+            logger.info(f"Error getting disabled tokens: {e}")
             return []
 
     def enableTokenIfExists(self, tokenAddress: str) -> Optional[int]:
@@ -511,7 +511,7 @@ class TradingHandler(BaseDBHandler):
                 return result['trackedtokenid'] if result else None
                 
         except Exception as e:
-            logger.error(f"Error enabling token {tokenAddress}: {e}")
+            logger.info(f"Error enabling token {tokenAddress}: {e}")
             return None
 
     
@@ -648,7 +648,7 @@ class TradingHandler(BaseDBHandler):
                 return trackedTokens
                 
         except Exception as e:
-            logger.error(f"TRADING SCHEDULER :: Error getting all VWAP data for scheduler: {e}")
+            logger.info(f"TRADING SCHEDULER :: Error getting all VWAP data for scheduler: {e}")
             return []
     
     
@@ -828,7 +828,7 @@ class TradingHandler(BaseDBHandler):
                 return list(trackedTokens.values())
                 
         except Exception as e:
-            logger.error(f"TRADING SCHEDULER :: Error getting EMA data with candles for scheduler: {e}")
+            logger.info(f"TRADING SCHEDULER :: Error getting EMA data with candles for scheduler: {e}")
             return []
 
 
@@ -886,7 +886,7 @@ class TradingHandler(BaseDBHandler):
             return createdRecords
                 
         except Exception as e:
-            logger.error(f"TRADING API :: Error creating initial timeframe records for {tokenAddress}: {e}")
+            logger.info(f"TRADING API :: Error creating initial timeframe records for {tokenAddress}: {e}")
             return []
     
     def collectDataForInitialTimeframeEntry(self, tokenAddress: str, pairAddress: str, 
@@ -998,7 +998,7 @@ class TradingHandler(BaseDBHandler):
                 return trackedTokens
                 
         except Exception as e:
-            logger.error(f"TRADING SCHEDULER: Error getting timeframe records ready for fetching: {e}")
+            logger.info(f"TRADING SCHEDULER: Error getting timeframe records ready for fetching: {e}")
             return []
 
 
@@ -1184,7 +1184,7 @@ class TradingHandler(BaseDBHandler):
             return totalCandlesInserted
             
         except Exception as e:
-            logger.error(f"TRADING API :: Error in batch persist calculated token data: {e}")
+            logger.info(f"TRADING API :: Error in batch persist calculated token data: {e}")
             return 0
 
     def batchPersistNewlyFetchedCandlesData(self, trackedTokens: List['TrackedToken'], maxCandlesPerTimeframe: int = None) -> int:
@@ -1370,7 +1370,7 @@ class TradingHandler(BaseDBHandler):
             return totalCandlesInserted
             
         except Exception as e:
-            logger.error(f"TRADING SCHEDULER :: Error in batch persist newly fetched candles: {e}")
+            logger.info(f"TRADING SCHEDULER :: Error in batch persist newly fetched candles: {e}")
             return 0
 
     def batchPersistEMAData(self, trackedTokens: List['TrackedToken']) -> int:
@@ -1495,7 +1495,7 @@ class TradingHandler(BaseDBHandler):
             return totalEMAStatesUpdated
             
         except Exception as e:
-            logger.error(f"TRADING SCHEDULER :: Error in batch persist EMA data: {e}")
+            logger.info(f"TRADING SCHEDULER :: Error in batch persist EMA data: {e}")
             return 0
 
     def batchPersistVWAPData(self, trackedTokens: List['TrackedToken']) -> int:
@@ -1558,7 +1558,7 @@ class TradingHandler(BaseDBHandler):
                 return totalVWAPSessionsUpdated
                 
         except Exception as e:
-            logger.error(f"TRADING SCHEDULER :: Error in batch persist VWAP data: {e}")
+            logger.info(f"TRADING SCHEDULER :: Error in batch persist VWAP data: {e}")
             return 0
 
     def getAllAVWAPDataForScheduler(self) -> List['TrackedToken']:
@@ -1736,7 +1736,7 @@ class TradingHandler(BaseDBHandler):
                 return list(trackedTokens.values())
                 
         except Exception as e:
-            logger.error(f"TRADING SCHEDULER :: Error getting AVWAP data with candles for scheduler: {e}")
+            logger.info(f"TRADING SCHEDULER :: Error getting AVWAP data with candles for scheduler: {e}")
             return []
 
     def batchPersistAVWAPData(self, trackedTokens: List['TrackedToken']) -> int:
@@ -1804,7 +1804,7 @@ class TradingHandler(BaseDBHandler):
                 return totalAVWAPStatesUpdated
                 
         except Exception as e:
-            logger.error(f"TRADING SCHEDULER :: Error in batch persist AVWAP data: {e}")
+            logger.info(f"TRADING SCHEDULER :: Error in batch persist AVWAP data: {e}")
             return 0
     
     def getAllRSIDataForScheduler(self) -> List['TrackedToken']:
@@ -2009,7 +2009,7 @@ class TradingHandler(BaseDBHandler):
                 return list(trackedTokens.values())
                 
         except Exception as e:
-            logger.error(f"TRADING SCHEDULER :: Error getting RSI data for scheduler: {e}", exc_info=True)
+            logger.info(f"TRADING SCHEDULER :: Error getting RSI data for scheduler: {e}", exc_info=True)
             return []
     
     def batchPersistRSIData(self, trackedTokens: List['TrackedToken']) -> int:
@@ -2131,7 +2131,7 @@ class TradingHandler(BaseDBHandler):
                 return totalRSIStatesUpdated
                 
         except Exception as e:
-            logger.error(f"TRADING SCHEDULER :: Error in batch persist RSI data: {e}", exc_info=True)
+            logger.info(f"TRADING SCHEDULER :: Error in batch persist RSI data: {e}", exc_info=True)
             return 0
 
     def batchUpdateTimeframeMetadata(self, cursor, timeframeMetadataData: List[Tuple]):
@@ -2310,7 +2310,7 @@ class TradingHandler(BaseDBHandler):
                 return True
                 
         except Exception as e:
-            logger.error(f"Error creating initial alerts: {e}")
+            logger.info(f"Error creating initial alerts: {e}")
             return False
     
     def batchPersistAlerts(self, trackedTokens: List['TrackedToken']) -> int:
@@ -2793,7 +2793,7 @@ class TradingHandler(BaseDBHandler):
 
             
         except Exception as e:
-            logger.error(f"TRADING SCHEDULER :: Error in optimized batch update for {columnName}: {e}")
+            logger.info(f"TRADING SCHEDULER :: Error in optimized batch update for {columnName}: {e}")
             raise
 
     

@@ -64,7 +64,7 @@ class NotificationHandler(BaseDBHandler):
                         )
                     """), (default_status,))
         except Exception as e:
-            logger.error(f"Error ensuring notification table exists: {e}")
+            logger.info(f"Error ensuring notification table exists: {e}")
     
     def createNotification(self, source: str, chatGroup: str, content: str, 
                           tokenId: Optional[str] = None, strategyType: Optional[str] = None,
@@ -105,7 +105,7 @@ class NotificationHandler(BaseDBHandler):
                     return None
 
         except Exception as e:
-            logger.error(f"Error creating notification: {e}")
+            logger.info(f"Error creating notification: {e}")
             return None
     
     def updateNotificationStatus(self, notificationId: int, status: str, 
@@ -143,7 +143,7 @@ class NotificationHandler(BaseDBHandler):
                 return cursor.rowcount > 0
                 
         except Exception as e:
-            logger.error(f"Error updating notification status: {e}")
+            logger.info(f"Error updating notification status: {e}")
             return False
     
     def getNotificationById(self, notificationId: int) -> Optional[dict]:
@@ -197,6 +197,6 @@ class NotificationHandler(BaseDBHandler):
                 return None
                 
         except Exception as e:
-            logger.error(f"Error getting notification by ID: {e}")
+            logger.info(f"Error getting notification by ID: {e}")
             return None
     
