@@ -32,7 +32,7 @@ class TradingScheduler:
 
     def handleTradingUpdatesFromJob(self):
         try:
-            logger.info("Trading scheduler started")
+            logger.info("TRADING SCHEDULER :: Trading scheduler started")
             
             self.fetchCandlesAndPersist()
             
@@ -46,39 +46,35 @@ class TradingScheduler:
             
             self.calculateAndPersistAlerts() # we need to check whether running the alerts processing in a sequential order affect the time take to run this scheduler, if it goes over 10 mins, then there would a delay fetching the recent candles
             
-            logger.info("Trading scheduler completed")
+            logger.info("TRADING SCHEDULER :: Trading scheduler completed")
             return True
             
         except Exception as e:
-            logger.error(f"Critical error in trading updates: {e}")
+            logger.info(f"TRADING SCHEDULER :: Critical error in trading updates: {e}")
             return False
 
     def fetchCandlesAndPersist(self):
         try:
             trackedTokens = self.trading_handler.getAllTimeframeRecordsReadyForFetching(buffer_seconds=1000)
             if not trackedTokens:
-                logger.info("No timeframe records ready for fetching")
+                logger.info("TRADING SCHEDULER :: No timeframe records ready for fetching")
                 return
             
             self.fetchCandlesForTrackedTokens(trackedTokens)
-            self.trading_handler.batchPersistTrackedTokensData(trackedTokens, maxCandlesPerTimeframe=None)
+            self.trading_handler.batchPersistNewlyFetchedCandlesData(trackedTokens, maxCandlesPerTimeframe=None)
             
-            logger.info("✓ Candles fetched and persisted")
             
         except Exception as e:
-            logger.error(f"✗ Candle Fetching/Persistence Failed: {e}")
-            # Don't raise - continue with indicator updates even if candle fetching fails
+            logger.info(f"TRADING SCHEDULER :: Candle Fetching/Persistence Failed: {e}")
       
 
     def fetchCandlesForTrackedTokens(self, trackedTokens: List[TrackedToken]):
-        logger.info("Fetching candles for tracked tokens")
         
         for trackedToken in trackedTokens:
-            logger.info(f"Fetching candles for {trackedToken.symbol} ({len(trackedToken.timeframeRecords)} timeframes)")
-            
+            logger.info(f"TRADING SCHEDULER :: Fetching started for {trackedToken.symbol} ({len(trackedToken.timeframeRecords)} timeframes)")
             for timeframeRecord in trackedToken.timeframeRecords:
                 if timeframeRecord.shouldFetchFromAPI(self.current_time):
-                    logger.info(f"Fetching {timeframeRecord.timeframe} candles for {trackedToken.symbol}")
+                    logger.info(f"TRADING SCHEDULER :: Fetching candles for {trackedToken.symbol} - {timeframeRecord.timeframe}")
                     
                     try:
                         candleResponse = self.trading_action.moralis_handler.getCandleDataForToken(
@@ -114,93 +110,97 @@ class TradingScheduler:
                             nextFetchTime = CommonUtil.calculateNextFetchTimeForTimeframe(candleResponse.latestTime, timeframeRecord.timeframe)
                             timeframeRecord.updateAfterFetch(candleResponse.latestTime, nextFetchTime)
                             
-                            logger.info(f"✓ Fetched {len(timeframeRecord.ohlcvDetails)} {timeframeRecord.timeframe} candles for {trackedToken.symbol}")
+                            logger.info(f"TRADING SCHEDULER :: {len(timeframeRecord.ohlcvDetails)} candles for {trackedToken.symbol} - {timeframeRecord.timeframe} ")
                         else:
-                            logger.warning(f"✗ Failed to fetch {timeframeRecord.timeframe} data for {trackedToken.symbol}: {candleResponse.error}")
+                            logger.warning(f"TRADING SCHEDULER :: Failed to fetchfor {trackedToken.symbol} - {timeframeRecord.timeframe} : {candleResponse.error}")
                             
                     except Exception as e:
-                        logger.error(f"✗ Error fetching {timeframeRecord.timeframe} data for {trackedToken.symbol}: {e}")
-                else:
-                    logger.info(f"Skipping {timeframeRecord.timeframe} fetch for {trackedToken.symbol} (nextFetchTime: {timeframeRecord.nextFetchAt} > currentTime: {self.current_time})")
+                        logger.info(f"TRADING SCHEDULER :: Error fetching for {trackedToken.symbol} - {timeframeRecord.timeframe}: {e}")
+            logger.info(f"TRADING SCHEDULER :: Fetching completed for {trackedToken.symbol} ({len(trackedToken.timeframeRecords)} timeframes)")
+
 
     def calculateAndPersistVWAPIndicators(self):
         try:
-            logger.info("VWAP Calculation Started")
+            logger.info("TRADING SCHEDULER :: VWAP Calculation Started")
             
             trackedTokens = self.trading_handler.getAllVWAPDataForScheduler()
             if not trackedTokens:
-                logger.info("No VWAP data to process")
+                logger.info("TRADING SCHEDULER :: No VWAP data to process")
                 return
             
             self.vwap_processor.calculateVWAPForAllTrackedTokens(trackedTokens)
+
             self.trading_handler.batchPersistVWAPData(trackedTokens)
             
-            logger.info("✓ VWAP Calculation Completed")
+            logger.info(f"TRADING SCHEDULER :: VWAP Calculation Completed")
             
         except Exception as e:
-            logger.error(f"✗ VWAP Calculation Failed: {e}")
+            logger.info(f"TRADING SCHEDULER :: VWAP Calculation Failed: {e}")
 
     def calculateAndPersistEMAIndicators(self):
         try:
-            logger.info("EMA Calculation Started")
+            logger.info("TRADING SCHEDULER :: EMA Calculation Started")
             
             trackedTokens = self.trading_handler.getAllEMADataWithCandlesForScheduler()
             if not trackedTokens:
-                logger.info("No EMA data to process")
+                logger.info("TRADING SCHEDULER :: No EMA data to process")
                 return
             
             self.ema_processor.calculateEMAForAllRetrievedTokens(trackedTokens)
+            
             self.trading_handler.batchPersistEMAData(trackedTokens)
             
-            logger.info(f"✓ EMA Calculation Completed for {len(trackedTokens)} tokens")
+            logger.info(f"TRADING SCHEDULER :: EMA Calculation Completed")
             
         except Exception as e:
-            logger.error(f"✗ EMA Calculation Failed: {e}")
+            logger.info(f"TRADING SCHEDULER :: EMA Calculation Failed: {e}")
 
     def calculateAndPersistAVWAPIndicators(self):
         
         try:
-            logger.info("AVWAP Calculation Started")
+            logger.info("TRADING SCHEDULER :: AVWAP Calculation Started")
             
             trackedTokens = self.trading_handler.getAllAVWAPDataForScheduler()
             
             if not trackedTokens:
-                logger.info("No AVWAP data to process")
+                logger.info("TRADING SCHEDULER :: No AVWAP data to process")
                 return
             
             self.avwap_processor.calculateAVWAPForAllTrackedTokens(trackedTokens)
+            
             self.trading_handler.batchPersistAVWAPData(trackedTokens)
             
-            logger.info(f"✓ AVWAP Calculation Completed for {len(trackedTokens)} tokens")
+            logger.info(f"TRADING SCHEDULER :: AVWAP Calculation Completed")
             
         except Exception as e:
-            logger.error(f"✗ AVWAP Calculation Failed: {e}")
+            logger.info(f"TRADING SCHEDULER :: AVWAP Calculation Failed: {e}")
     
     def calculateAndPersistRSIIndicators(self):
         try:
-            logger.info("RSI Calculation Started")
+            logger.info("TRADING SCHEDULER :: RSI Calculation Started")
             
             trackedTokens = self.trading_handler.getAllRSIDataForScheduler()
             
             if not trackedTokens:
-                logger.info("No RSI data to process")
+                logger.info("TRADING SCHEDULER :: No RSI data to process")
                 return
             
             self.rsi_processor.calculateRSIForAllTrackedTokens(trackedTokens)
+            
             self.trading_handler.batchPersistRSIData(trackedTokens)
             
-            logger.info(f"✓ RSI Calculation Completed for {len(trackedTokens)} tokens")
+            logger.info(f"TRADING SCHEDULER :: RSI Calculation Completed")
             
         except Exception as e:
-            logger.error(f"✗ RSI Calculation Failed: {e}")
+            logger.info(f"TRADING SCHEDULER :: RSI Calculation Failed: {e}")
     
     def calculateAndPersistAlerts(self):
         try:
-            logger.info("Alert Processing Started")
+            logger.info("TRADING SCHEDULER :: Alert Processing Started")
             
             alertsWithNewCandles = self.trading_handler.getCurrentAlertStateAndNewCandles()
             if not alertsWithNewCandles:
-                logger.info("No alerts to process")
+                logger.info("TRADING SCHEDULER :: No alerts to process")
                 return
             
             # Process alerts for all tracked tokens
@@ -209,10 +209,10 @@ class TradingScheduler:
             # Persist updated alert data
             alertsUpdated = self.trading_handler.batchPersistAlerts(alertsWithNewCandles)
             
-            logger.info(f"✓ Alert Processing Completed for {alertsUpdated} alerts")
+            logger.info(f"TRADING SCHEDULER :: Alert Processing Completed")
             
         except Exception as e:
-            logger.error(f"✗ Alert Processing Failed: {e}")
+            logger.info(f"TRADING SCHEDULER :: Alert Processing Failed: {e}")
 
     def handleTradingDataFromAPI(self) -> Dict[str, Any]:
         success = self.handleTradingUpdatesFromJob()

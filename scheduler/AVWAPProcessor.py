@@ -60,19 +60,13 @@ class AVWAPProcessor:
         self.moralis_handler = moralis_handler
     
     
-    
-    
-    
-   
-    
-    
     def calculateAVWAPInMemory(self, timeframeRecord, tokenAddress: str, pairAddress: str) -> None:
         try:
             if not timeframeRecord.ohlcvDetails:
-                logger.warning(f"No candles available for AVWAP calculation: {tokenAddress} {timeframeRecord.timeframe}")
+                logger.warning(f"TRADING API :: No candles available for AVWAP {tokenAddress} - {timeframeRecord.timeframe}")
                 return
             
-            logger.info(f"Processing AVWAP for {tokenAddress} {timeframeRecord.timeframe} with {len(timeframeRecord.ohlcvDetails)} candles")
+            logger.info(f"TRADING API :: AVWAP calculation started for {tokenAddress} - {timeframeRecord.timeframe}")
             
             # Calculate cumulative values
             cumulativePV = 0.0
@@ -109,10 +103,10 @@ class AVWAPProcessor:
                 nextFetchTime=nextFetchTime
             )
             
-            logger.info(f"Calculated AVWAP for {tokenAddress} {timeframeRecord.timeframe}: {timeframeRecord.avwapState.avwap:.8f}")
+            logger.info(f"TRADING API :: AVWAP calculation completed for {tokenAddress} - {timeframeRecord.timeframe}: {timeframeRecord.avwapState.avwap:.8f}")
             
         except Exception as e:
-            logger.error(f"Error calculating AVWAP in memory for {tokenAddress} {timeframeRecord.timeframe}: {e}")
+            logger.error(f"TRADING API :: Error calculating AVWAP for {tokenAddress} - {timeframeRecord.timeframe}: {e}")
 
     def calculateAVWAPForAllTrackedTokens(self, trackedTokens: List['TrackedToken']) -> None:
         

@@ -63,11 +63,11 @@ class MoralisServiceHandler:
             CandleResponse: Response with candles and metadata
         """
         try:
-            logger.info(f"Moralis unified fetch: {tokenAddress} from {fromTime} to {toTime}, timeframe: {timeframe}")
+            logger.info(f"MORALIS :: fetch: {tokenAddress} from {fromTime} to {toTime}, timeframe: {timeframe}")
             
             # Validate timeframe
             if not self.isCorrectTimeframe(timeframe):
-                return CandleResponse.errorResponse(f"Unsupported timeframe: {timeframe}")
+                return CandleResponse.errorResponse(f"MORALIS :: Unsupported timeframe: {timeframe}")
             
             # Initialize fetch state
             fetchState = FetchState.createForFetch(self.defaultChain, fromTime)
@@ -96,7 +96,7 @@ class MoralisServiceHandler:
         
         # Get initial API key
         if not self.getNewAPIKey(fetchState):
-            raise Exception('No more valid API keys available')
+            raise Exception('MORALIS :: No more valid API keys available')
         
         fetchState.currentToTime = toTime
         apiCallCount = 0
@@ -107,7 +107,7 @@ class MoralisServiceHandler:
                 self.switchToNewAPIKey(fetchState)
             
             apiCallCount += 1
-            logger.info(f"Moralis API call #{apiCallCount}: from {fromTime} to {fetchState.currentToTime}")
+            logger.info(f"MORALIS :: API call #{apiCallCount}: from {fromTime} to {fetchState.currentToTime}")
             
             # Make API call
             apiResponse = self.hitAPI(
@@ -120,19 +120,19 @@ class MoralisServiceHandler:
             )
             
             if not apiResponse or not apiResponse.get('result'):
-                logger.warning("No result or empty result from API, stopping fetch")
+                logger.warning("MORALIS :: No result or empty result from API, stopping fetch")
                 break
             
             candlesFromAPI = apiResponse['result']
             if not candlesFromAPI:
-                logger.info("No candles in result, stopping fetch")
+                logger.info("MORALIS :: No candles in result, stopping fetch")
                 break
             
             # Process batch with deduplication
             newCandlesCount, oldestTimestamp = self.formatAndDeduplicateCandles(candlesFromAPI, fetchState)
             
             if newCandlesCount == 0:
-                logger.info("No new candles found (all duplicates), stopping fetch")
+                logger.info("MORALIS :: No new candles found (all duplicates), stopping fetch")
                 break
             
             # Update credits after successful call
@@ -148,7 +148,7 @@ class MoralisServiceHandler:
             # Rate limiting
             time.sleep(MoralisAPIConstants.RATE_LIMIT_DELAY_SECONDS)
         
-        logger.info(f"Moralis pagination completed after {apiCallCount} API calls")
+        logger.info(f"MORALIS :: Pagination completed after {apiCallCount} API calls")
     
     def formatAndDeduplicateCandles(self, candles: List[Dict], fetchState: FetchState) -> tuple[int, int]:
         """Process batch of candles with deduplication tracking"""
@@ -238,7 +238,7 @@ class MoralisServiceHandler:
                 logger.warning(f"Invalid candle data skipped: {e}")
                 continue
         
-        logger.info(f"Processed {len(processedCandles)} complete candles, "
+        logger.info(f"MORALIS :: Processed {len(processedCandles)} complete candles, "
                    f"filtered out incomplete candles >= {currentLiveCandleStartTime}")
         return processedCandles, latestTime
     
@@ -277,20 +277,6 @@ class MoralisServiceHandler:
     
     def hitAPI(self, apiKey: str, pairAddress: str, fromTime: int, 
                        toTime: int, timeframe: str, chain: str) -> Optional[Dict]:
-        """
-        Get single chunk of candle data from Moralis API
-        
-        Args:
-            apiKey: Valid Moralis API key
-            pairAddress: Token pair address
-            fromTime: Start timestamp (exclusive)
-            toTime: End timestamp (inclusive)
-            timeframe: Candle timeframe
-            chain: Blockchain network
-            
-        Returns:
-            Optional[Dict]: Raw API response or None if failed
-        """
         
         # Convert unix timestamps to milliseconds for Moralis API
         fromDate = fromTime * MoralisAPIConstants.MILLISECONDS_MULTIPLIER
@@ -321,16 +307,10 @@ class MoralisServiceHandler:
             response.raise_for_status()
             data = response.json()
             
-            logger.debug(f"Moralis API response: {len(data.get('result', []))} candles, "
-                        f"cursor: {data.get('cursor', 'None')}")
-            
             return data
                 
-        except requests.exceptions.RequestException as e:
-            logger.error(f"Moralis API request failed: {e}")
-            return None
         except Exception as e:
-            logger.error(f"Unexpected error in Moralis API call: {e}")
+            logger.error(f"MORALIS :: Error in API call: {e}")
             return None
     
     def getNewAPIKey(self, fetchState: FetchState) -> bool:
@@ -384,7 +364,7 @@ class MoralisServiceHandler:
                 keyUsage['api_key_id'], 
                 keyUsage['credits_used']
             )
-            logger.debug(f"Persisted {keyUsage['credits_used']} credits for Moralis API key {keyUsage['api_key_id']}")
+            logger.debug(f"MORALIS :: Persisted {keyUsage['credits_used']} credits for API key {keyUsage['api_key_id']}")
     
     def isCorrectTimeframe(self, timeframe: str) -> bool:
         """Validate if timeframe is supported by Moralis"""

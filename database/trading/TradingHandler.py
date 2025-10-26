@@ -291,6 +291,8 @@ class TradingHandler(BaseDBHandler):
         """
         try:
             now = datetime.now(timezone.utc)
+
+            logger.info(f"TRADING API :: Adding token {symbol} - tracked token - started")
             
             with self.conn_manager.transaction() as cursor:
                 # Use UPSERT (INSERT ... ON CONFLICT ... DO UPDATE)
@@ -319,11 +321,11 @@ class TradingHandler(BaseDBHandler):
                 )
                 result = cursor.fetchone()
                 tokenId = result[TradingHandlerConstants.TrackedTokens.TRACKED_TOKEN_ID]
-                logger.info(f"Upserted token {tokenAddress} with ID {tokenId}")
+                logger.info(f"TRADING API :: Adding token {symbol} - tracked token - completed")
                 return tokenId
                 
         except Exception as e:
-            logger.error(f"Error adding token {tokenAddress}: {e}")
+            logger.error(f"TRADING API :: Error adding token {symbol} - tracked token - {e}")
             return None
 
     def disableToken(self, tokenAddress: str, disabledBy: str = None, reason: str = None) -> Dict[str, Any]:
@@ -520,6 +522,7 @@ class TradingHandler(BaseDBHandler):
     
     def getAllVWAPDataForScheduler(self) -> List['TrackedToken']:
 
+        logger.info(f"TRADING SCHEDULER :: getting all VWAP data for scheduler started")
         try:
             with self.conn_manager.transaction() as cursor:
                 # Get all active tokens with their timeframes and VWAP session data
@@ -640,10 +643,12 @@ class TradingHandler(BaseDBHandler):
                             timeframeRecord.addOHLCVDetail(ohlcvDetail)
                 
                 trackedTokens = list(trackedTokensMap.values())
+
+                logger.info(f"TRADING SCHEDULER :: getting all VWAP data for scheduler completed")
                 return trackedTokens
                 
         except Exception as e:
-            logger.error(f"Error getting all VWAP data for scheduler: {e}")
+            logger.error(f"TRADING SCHEDULER :: Error getting all VWAP data for scheduler: {e}")
             return []
     
     
@@ -661,6 +666,7 @@ class TradingHandler(BaseDBHandler):
         Returns:
             List[TrackedToken]: List of tracked tokens with EMA data and candles
         """
+        logger.info(f"TRADING SCHEDULER :: getting all EMA data for scheduler started")
         try:        
             with self.conn_manager.transaction() as cursor:
                 # Single optimized query with JOINs
@@ -818,10 +824,11 @@ class TradingHandler(BaseDBHandler):
                             )
                             timeframeRecord.addOHLCVDetail(candle)
                 
+                logger.info(f"TRADING SCHEDULER :: getting all EMA data for scheduler completed")
                 return list(trackedTokens.values())
                 
         except Exception as e:
-            logger.error(f"Error getting EMA data with candles for scheduler: {e}")
+            logger.error(f"TRADING SCHEDULER :: Error getting EMA data with candles for scheduler: {e}")
             return []
 
 
@@ -844,7 +851,7 @@ class TradingHandler(BaseDBHandler):
         """
         try:
             if not timeframes:
-                logger.info(f"No timeframes provided for {tokenAddress}")
+                logger.info(f"TRADING API :: No timeframes provided for {tokenAddress}")
                 return []
                 
             # Collect data for timeframe records (outside transaction)
@@ -853,12 +860,14 @@ class TradingHandler(BaseDBHandler):
             )
             
             if not timeframeRecords:
-                logger.info(f"No timeframe records to create for {tokenAddress}")
+                logger.info(f"TRADING API :: No timeframe records to create for {tokenAddress}")
                 return []
             
             # Execute database operations in transaction
             with self.conn_manager.transaction() as cursor:
+                logger.info(f"TRADING API :: Recording initial timeframe entry for {tokenAddress} - started")
                 persistedRecords = self.recordInitialTimeframeEntry(cursor, timeframeRecords)
+                logger.info(f"TRADING API :: Recording initial timeframe entry for {tokenAddress} - completed")
             
             # Create TimeframeRecord POJOs from persisted data
             createdRecords = []
@@ -873,12 +882,11 @@ class TradingHandler(BaseDBHandler):
                     isActive=True
                 )
                 createdRecords.append(timeframeRecord)
-            
-            logger.info(f"Created {len(createdRecords)} initial timeframe records for {tokenAddress}")
+        
             return createdRecords
                 
         except Exception as e:
-            logger.error(f"Error creating initial timeframe records for {tokenAddress}: {e}")
+            logger.error(f"TRADING API :: Error creating initial timeframe records for {tokenAddress}: {e}")
             return []
     
     def collectDataForInitialTimeframeEntry(self, tokenAddress: str, pairAddress: str, 
@@ -924,6 +932,8 @@ class TradingHandler(BaseDBHandler):
         try:
             currentTime = int(time.time())
             bufferTime = currentTime - buffer_seconds
+
+            logger.info(f"TRADING SCHEDULER: Initiating DB call to get the tokens that needs API candle fetch")
             
             with self.conn_manager.transaction() as cursor:
                 cursor.execute(text("""
@@ -984,18 +994,20 @@ class TradingHandler(BaseDBHandler):
                     trackedTokensMap[tokenAddress].addTimeframeRecord(timeframeRecord)
                 
                 trackedTokens = list(trackedTokensMap.values())
-                logger.info(f"Found {len(trackedTokens)} tracked tokens with {sum(len(t.timeframeRecords) for t in trackedTokens)} timeframe records ready for fetching")
+                logger.info(f"TRADING SCHEDULER: Found {len(trackedTokens)}")
                 return trackedTokens
                 
         except Exception as e:
-            logger.error(f"Error getting timeframe records ready for fetching: {e}")
+            logger.error(f"TRADING SCHEDULER: Error getting timeframe records ready for fetching: {e}")
             return []
 
 
-    def batchPersistOptimizedTokenData(self, timeframeRecords: List, maxCandlesPerTimeframe: int = None) -> int:
+    def batchPersistCalculatedTokenData(self, timeframeRecords: List, maxCandlesPerTimeframe: int = None) -> int:
         
         try:
             totalCandlesInserted = 0
+            
+            logger.info(f"TRADING API :: Transaction initiated to persist calculated token data")
             
             with self.conn_manager.transaction() as cursor:
                 # Collect all data for batch operations
@@ -1151,34 +1163,36 @@ class TradingHandler(BaseDBHandler):
                 
                 # Execute all batch operations
                 if timeframeMetadataData:
-                    self._batchUpdateTimeframeMetadata(cursor, timeframeMetadataData)
+                    self.batchUpdateTimeframeMetadata(cursor, timeframeMetadataData)
                 
                 if candleData:
-                    self._batchInsertCandles(cursor, candleData)
+                    self.batchInsertCandles(cursor, candleData)
                 
                 if vwapSessionData:
-                    self._batchInsertVWAPSessions(cursor, vwapSessionData)
+                    self.batchInsertVWAPSessions(cursor, vwapSessionData)
                 
                 if emaStateData:
-                    self._batchInsertEMAStates(cursor, emaStateData)
+                    self.batchInsertEMAStates(cursor, emaStateData)
                 
                 if avwapStateData:
-                    self._batchInsertAVWAPStates(cursor, avwapStateData)
+                    self.batchInsertAVWAPStates(cursor, avwapStateData)
                 
                 if rsiStateData:
-                    self._batchInsertRSIStates(cursor, rsiStateData)
+                    self.batchInsertRSIStates(cursor, rsiStateData)
             
-            logger.info(f"Batch persisted {totalCandlesInserted} candles and all indicator data in single transaction")
+            logger.info(f"TRADING API :: Batch persisted {totalCandlesInserted} candles and all indicator data in single transaction")
             return totalCandlesInserted
             
         except Exception as e:
-            logger.error(f"Error in batch persist optimized token data: {e}")
+            logger.error(f"TRADING API :: Error in batch persist calculated token data: {e}")
             return 0
 
-    def batchPersistTrackedTokensData(self, trackedTokens: List['TrackedToken'], maxCandlesPerTimeframe: int = None) -> int:
+    def batchPersistNewlyFetchedCandlesData(self, trackedTokens: List['TrackedToken'], maxCandlesPerTimeframe: int = None) -> int:
         
         try:
             totalCandlesInserted = 0
+
+            logger.info(f"TRADING SCHEDULER :: Transaction initiated to persist newly fetched candles")
             
             with self.conn_manager.transaction() as cursor:
                 # Collect all data for batch operations
@@ -1335,32 +1349,44 @@ class TradingHandler(BaseDBHandler):
                 
                 # Execute all batch operations
                 if timeframeMetadataData:
-                    self._batchUpdateTimeframeMetadata(cursor, timeframeMetadataData)
+                    self.batchUpdateTimeframeMetadata(cursor, timeframeMetadataData)
                 
                 if candleData:
-                    self._batchInsertCandles(cursor, candleData)
+                    self.batchInsertCandles(cursor, candleData)
                 
                 if vwapSessionData:
-                    self._batchInsertVWAPSessions(cursor, vwapSessionData)
+                    self.batchInsertVWAPSessions(cursor, vwapSessionData)
                 
                 if emaStateData:
-                    self._batchInsertEMAStates(cursor, emaStateData)
+                    self.batchInsertEMAStates(cursor, emaStateData)
                 
                 if avwapStateData:
-                    self._batchInsertAVWAPStates(cursor, avwapStateData)
+                    self.batchInsertAVWAPStates(cursor, avwapStateData)
                 
                 if rsiStateData:
-                    self._batchInsertRSIStates(cursor, rsiStateData)
+                    self.batchInsertRSIStates(cursor, rsiStateData)
             
+            logger.info(f"TRADING SCHEDULER :: Transaction completed to persist newly fetched candles")
             return totalCandlesInserted
             
         except Exception as e:
-            logger.error(f"Error in batch persist tracked tokens data: {e}")
+            logger.error(f"TRADING SCHEDULER :: Error in batch persist newly fetched candles: {e}")
             return 0
 
     def batchPersistEMAData(self, trackedTokens: List['TrackedToken']) -> int:
+        """
+        OPTIMIZED: Batch persist EMA data using temporary tables for maximum performance
+        
+        Performance improvements:
+        - Uses temporary tables instead of individual UPDATE statements
+        - Single batch operation instead of thousands of individual updates
+        - Reduces network round trips from N to 1
+        - Eliminates individual query parsing and planning overhead
+        """
         try:
             totalEMAStatesUpdated = 0
+
+            logger.info(f"TRADING SCHEDULER :: Transaction initiated to persist EMA data")
             
             with self.conn_manager.transaction() as cursor:
                 emaStateData = []
@@ -1450,46 +1476,42 @@ class TradingHandler(BaseDBHandler):
                 
                 # Execute EMA-specific batch operations
                 if emaStateData:
-                    self._batchInsertEMAStates(cursor, emaStateData)
+                    self.batchInsertEMAStates(cursor, emaStateData)
                 
-                # Update EMA12 values
+                # OPTIMIZED: Use temporary tables for candle updates
                 if ema12CandleUpdates:
-                    cursor.executemany("""
-                        UPDATE ohlcvdetails 
-                        SET ema12value = %s
-                        WHERE tokenaddress = %s AND timeframe = %s AND unixtime = %s
-                    """, ema12CandleUpdates)
-                    logger.info(f"Batch updated {len(ema12CandleUpdates)} EMA12 candle values")
+                    self.batchUpdateCandlesWithTempTable(cursor, ema12CandleUpdates, 'ema12value')
+                    logger.info(f"Optimized batch updated {len(ema12CandleUpdates)} EMA12 candle values")
                 
-                # Update EMA21 values
                 if ema21CandleUpdates:
-                    cursor.executemany("""
-                        UPDATE ohlcvdetails 
-                        SET ema21value = %s
-                        WHERE tokenaddress = %s AND timeframe = %s AND unixtime = %s
-                    """, ema21CandleUpdates)
-                    logger.info(f"Batch updated {len(ema21CandleUpdates)} EMA21 candle values")
+                    self.batchUpdateCandlesWithTempTable(cursor, ema21CandleUpdates, 'ema21value')
+                    logger.info(f"Optimized batch updated {len(ema21CandleUpdates)} EMA21 candle values")
                 
-                # Update EMA34 values
                 if ema34CandleUpdates:
-                    cursor.executemany("""
-                        UPDATE ohlcvdetails 
-                        SET ema34value = %s
-                        WHERE tokenaddress = %s AND timeframe = %s AND unixtime = %s
-                    """, ema34CandleUpdates)
-                    logger.info(f"Batch updated {len(ema34CandleUpdates)} EMA34 candle values")
-                        
+                    self.batchUpdateCandlesWithTempTable(cursor, ema34CandleUpdates, 'ema34value')
+                    logger.info(f"Optimized batch updated {len(ema34CandleUpdates)} EMA34 candle values")
                 
+                logger.info(f"TRADING SCHEDULER :: Transaction completed to persist EMA data")
             return totalEMAStatesUpdated
             
         except Exception as e:
-            logger.error(f"Error in batch persist EMA data: {e}")
+            logger.error(f"TRADING SCHEDULER :: Error in batch persist EMA data: {e}")
             return 0
 
     def batchPersistVWAPData(self, trackedTokens: List['TrackedToken']) -> int:
-       
+        """
+        OPTIMIZED: Batch persist VWAP data using temporary tables for maximum performance
+        
+        Performance improvements:
+        - Uses temporary tables instead of individual UPDATE statements
+        - Single batch operation instead of thousands of individual updates
+        - Reduces network round trips from N to 1
+        - Eliminates individual query parsing and planning overhead
+        """
         try:
             totalVWAPSessionsUpdated = 0
+
+            logger.info(f"TRADING SCHEDULER :: Transaction initiated to persist VWAP data")
             
             with self.conn_manager.transaction() as cursor:
                 # Collect VWAP-specific data for batch operations
@@ -1526,21 +1548,17 @@ class TradingHandler(BaseDBHandler):
                 
                 # Execute VWAP-specific batch operations
                 if vwapSessionData:
-                    self._batchInsertVWAPSessions(cursor, vwapSessionData)
+                    self.batchInsertVWAPSessions(cursor, vwapSessionData)
                 
                 if vwapCandleUpdates:
-                    cursor.executemany("""
-                        UPDATE ohlcvdetails 
-                        SET vwapvalue = %s
-                        WHERE tokenaddress = %s AND timeframe = %s AND unixtime = %s
-                    """, vwapCandleUpdates)
-                    logger.info(f"Batch updated {len(vwapCandleUpdates)} VWAP candle values")
+                    self.batchUpdateCandlesWithTempTable(cursor, vwapCandleUpdates, 'vwapvalue')
+            
                 
-                logger.info(f"Batch persisted {totalVWAPSessionsUpdated} VWAP sessions and {len(vwapCandleUpdates)} candle VWAP values")
+                logger.info(f"TRADING SCHEDULER :: Transaction completed to persist VWAP data") 
                 return totalVWAPSessionsUpdated
                 
         except Exception as e:
-            logger.error(f"Error in batch persist VWAP data: {e}")
+            logger.error(f"TRADING SCHEDULER :: Error in batch persist VWAP data: {e}")
             return 0
 
     def getAllAVWAPDataForScheduler(self) -> List['TrackedToken']:
@@ -1556,6 +1574,7 @@ class TradingHandler(BaseDBHandler):
         Returns:
             List[TrackedToken]: List of tracked tokens with AVWAP data and candles
         """
+        logger.info(f"TRADING SCHEDULER :: getting all AVWAP data for scheduler started")
         try:        
             with self.conn_manager.transaction() as cursor:
                 # Single optimized query with JOINs for AVWAP data
@@ -1713,15 +1732,22 @@ class TradingHandler(BaseDBHandler):
                             )
                             timeframeRecord.addOHLCVDetail(candle)
                 
+                logger.info(f"TRADING SCHEDULER :: getting all AVWAP data for scheduler completed")
                 return list(trackedTokens.values())
                 
         except Exception as e:
-            logger.error(f"Error getting AVWAP data with candles for scheduler: {e}")
+            logger.error(f"TRADING SCHEDULER :: Error getting AVWAP data with candles for scheduler: {e}")
             return []
 
     def batchPersistAVWAPData(self, trackedTokens: List['TrackedToken']) -> int:
         """
-        OPTIMIZED: Batch persist only AVWAP data (AVWAP states + candle AVWAP values)
+        OPTIMIZED: Batch persist AVWAP data using temporary tables for maximum performance
+        
+        Performance improvements:
+        - Uses temporary tables instead of individual UPDATE statements
+        - Single batch operation instead of thousands of individual updates
+        - Reduces network round trips from N to 1
+        - Eliminates individual query parsing and planning overhead
         
         Args:
             trackedTokens: List of TrackedToken POJOs with AVWAP data
@@ -1731,6 +1757,8 @@ class TradingHandler(BaseDBHandler):
         """
         try:
             totalAVWAPStatesUpdated = 0
+
+            logger.info(f"TRADING SCHEDULER :: Transaction initiated to persist AVWAP data")
             
             with self.conn_manager.transaction() as cursor:
                 # Collect AVWAP-specific data for batch operations
@@ -1765,21 +1793,18 @@ class TradingHandler(BaseDBHandler):
                 
                 # Execute AVWAP-specific batch operations
                 if avwapStateData:
-                    self._batchInsertAVWAPStates(cursor, avwapStateData)
+                    self.batchInsertAVWAPStates(cursor, avwapStateData)
                 
+                # OPTIMIZED: Use temporary table for candle updates
                 if avwapCandleUpdates:
-                    cursor.executemany("""
-                        UPDATE ohlcvdetails 
-                        SET avwapvalue = %s
-                        WHERE tokenaddress = %s AND timeframe = %s AND unixtime = %s
-                    """, avwapCandleUpdates)
-                    logger.info(f"Batch updated {len(avwapCandleUpdates)} AVWAP candle values")
+                    self.batchUpdateCandlesWithTempTable(cursor, avwapCandleUpdates, 'avwapvalue')
+                    logger.info(f"Optimized batch updated {len(avwapCandleUpdates)} AVWAP candle values")
                 
-                logger.info(f"Batch persisted {totalAVWAPStatesUpdated} AVWAP states and {len(avwapCandleUpdates)} candle AVWAP values")
+                logger.info(f"TRADING SCHEDULER :: Transaction completed to persist AVWAP data")
                 return totalAVWAPStatesUpdated
                 
         except Exception as e:
-            logger.error(f"Error in batch persist AVWAP data: {e}")
+            logger.error(f"TRADING SCHEDULER :: Error in batch persist AVWAP data: {e}")
             return 0
     
     def getAllRSIDataForScheduler(self) -> List['TrackedToken']:
@@ -1789,6 +1814,7 @@ class TradingHandler(BaseDBHandler):
         Returns:
             List[TrackedToken]: List of tracked tokens with RSI data and candles
         """
+        logger.info(f"TRADING SCHEDULER :: getting all RSI data for scheduler started")
         try:
             with self.conn_manager.transaction() as cursor:
                 # Query to get RSI states with candles
@@ -1979,16 +2005,22 @@ class TradingHandler(BaseDBHandler):
                         timeframeRecord.addOHLCVDetail(ohlcvDetail)
                         seenCandles[tokenAddress][timeframe].add(candleUnixTime)
                 
-                logger.info(f"Retrieved {len(trackedTokens)} tokens with RSI data for scheduler")
+                logger.info(f"TRADING SCHEDULER :: getting all RSI data for scheduler completed")
                 return list(trackedTokens.values())
                 
         except Exception as e:
-            logger.error(f"Error getting RSI data for scheduler: {e}", exc_info=True)
+            logger.error(f"TRADING SCHEDULER :: Error getting RSI data for scheduler: {e}", exc_info=True)
             return []
     
     def batchPersistRSIData(self, trackedTokens: List['TrackedToken']) -> int:
         """
-        Batch persist RSI data (RSI states + candle RSI values)
+        OPTIMIZED: Batch persist RSI data using temporary tables for maximum performance
+        
+        Performance improvements:
+        - Uses temporary tables instead of individual UPDATE statements
+        - Single batch operation instead of thousands of individual updates
+        - Reduces network round trips from N to 1
+        - Eliminates individual query parsing and planning overhead
         
         Args:
             trackedTokens: List of TrackedToken POJOs with RSI data
@@ -1998,6 +2030,8 @@ class TradingHandler(BaseDBHandler):
         """
         try:
             totalRSIStatesUpdated = 0
+
+            logger.info(f"TRADING SCHEDULER :: Transaction initiated to persist RSI data")
             
             with self.conn_manager.transaction() as cursor:
                 rsiStateData = []
@@ -2074,49 +2108,35 @@ class TradingHandler(BaseDBHandler):
                 
                 # Execute RSI batch operations
                 if rsiStateData:
-                    self._batchInsertRSIStates(cursor, rsiStateData)
+                    self.batchInsertRSIStates(cursor, rsiStateData)
                 
+                # OPTIMIZED: Use temporary tables for candle updates
                 if rsiCandleUpdates:
-                    cursor.executemany("""
-                        UPDATE ohlcvdetails 
-                        SET rsivalue = %s
-                        WHERE tokenaddress = %s AND timeframe = %s AND unixtime = %s
-                    """, rsiCandleUpdates)
-                    logger.info(f"Batch updated {len(rsiCandleUpdates)} RSI candle values")
+                    self.batchUpdateCandlesWithTempTable(cursor, rsiCandleUpdates, 'rsivalue')
+                    logger.info(f"Optimized batch updated {len(rsiCandleUpdates)} RSI candle values")
                 
                 if stochRSICandleUpdates:
-                    cursor.executemany("""
-                        UPDATE ohlcvdetails 
-                        SET stochrsivalue = %s
-                        WHERE tokenaddress = %s AND timeframe = %s AND unixtime = %s
-                    """, stochRSICandleUpdates)
-                    logger.info(f"Batch updated {len(stochRSICandleUpdates)} Stochastic RSI candle values")
+                    self.batchUpdateCandlesWithTempTable(cursor, stochRSICandleUpdates, 'stochrsivalue')
+                    logger.info(f"Optimized batch updated {len(stochRSICandleUpdates)} Stochastic RSI candle values")
                 
                 if stochRSIKCandleUpdates:
-                    cursor.executemany("""
-                        UPDATE ohlcvdetails 
-                        SET stochrsik = %s
-                        WHERE tokenaddress = %s AND timeframe = %s AND unixtime = %s
-                    """, stochRSIKCandleUpdates)
-                    logger.info(f"Batch updated {len(stochRSIKCandleUpdates)} Stochastic RSI %K candle values")
+                    self.batchUpdateCandlesWithTempTable(cursor, stochRSIKCandleUpdates, 'stochrsik')
+                    logger.info(f"Optimized batch updated {len(stochRSIKCandleUpdates)} Stochastic RSI %K candle values")
                 
                 if stochRSIDCandleUpdates:
-                    cursor.executemany("""
-                        UPDATE ohlcvdetails 
-                        SET stochrsid = %s
-                        WHERE tokenaddress = %s AND timeframe = %s AND unixtime = %s
-                    """, stochRSIDCandleUpdates)
-                    logger.info(f"Batch updated {len(stochRSIDCandleUpdates)} Stochastic RSI %D candle values")
+                    self.batchUpdateCandlesWithTempTable(cursor, stochRSIDCandleUpdates, 'stochrsid')
+                    logger.info(f"Optimized batch updated {len(stochRSIDCandleUpdates)} Stochastic RSI %D candle values")
                 
-                logger.info(f"Batch persisted {totalRSIStatesUpdated} RSI states")
+                logger.info(f"TRADING SCHEDULER :: Transaction completed to persist RSI data")
                 return totalRSIStatesUpdated
                 
         except Exception as e:
-            logger.error(f"Error in batch persist RSI data: {e}", exc_info=True)
+            logger.error(f"TRADING SCHEDULER :: Error in batch persist RSI data: {e}", exc_info=True)
             return 0
 
-    def _batchUpdateTimeframeMetadata(self, cursor, timeframeMetadataData: List[Tuple]):
+    def batchUpdateTimeframeMetadata(self, cursor, timeframeMetadataData: List[Tuple]):
         """Batch update timeframe metadata"""
+        logger.info(f"TRADING SCHEDULER: DB call started to update timeframe metadata")
         cursor.executemany("""
             INSERT INTO timeframemetadata 
             (tokenaddress, pairaddress, timeframe, lastfetchedat, nextfetchat, createdat, lastupdatedat)
@@ -2127,9 +2147,11 @@ class TradingHandler(BaseDBHandler):
                 nextfetchat = EXCLUDED.nextfetchat,
                 lastupdatedat = NOW()
         """, timeframeMetadataData)
+        logger.info(f"TRADING SCHEDULER: DB call completed to update timeframe metadata")
 
-    def _batchInsertCandles(self, cursor, candleData: List[Tuple]):
+    def batchInsertCandles(self, cursor, candleData: List[Tuple]):
         """Batch insert candles with indicator values"""
+        logger.info(f"TRADING SCHEDULER: DB call started to insert candles")
         cursor.executemany("""
             INSERT INTO ohlcvdetails 
             (timeframeid, tokenaddress, pairaddress, timeframe, unixtime, timebucket, 
@@ -2156,9 +2178,11 @@ class TradingHandler(BaseDBHandler):
                 status12 = EXCLUDED.status12,
                 lastupdatedat = NOW()
         """, candleData)
+        logger.info(f"TRADING SCHEDULER: DB call completed to insert candles")
 
-    def _batchInsertVWAPSessions(self, cursor, vwapSessionData: List[Tuple]):
+    def batchInsertVWAPSessions(self, cursor, vwapSessionData: List[Tuple]):
         """Batch insert/update VWAP sessions"""
+        logger.info(f"TRADING SCHEDULER: DB call started to insert VWAP sessions")
         cursor.executemany("""
             INSERT INTO vwapsessions 
             (tokenaddress, pairaddress, timeframe, sessionstartunix, sessionendunix,
@@ -2176,9 +2200,11 @@ class TradingHandler(BaseDBHandler):
                 nextcandlefetch = EXCLUDED.nextcandlefetch,
                 lastupdatedat = NOW()
         """, vwapSessionData)
+        logger.info(f"TRADING SCHEDULER: DB call completed to insert VWAP sessions")
 
-    def _batchInsertEMAStates(self, cursor, emaStateData: List[Tuple]):
+    def batchInsertEMAStates(self, cursor, emaStateData: List[Tuple]):
         """Batch insert/update EMA states"""
+        logger.info(f"TRADING SCHEDULER: DB call started to insert EMA states")
         cursor.executemany("""
             INSERT INTO emastates 
             (tokenaddress, pairaddress, timeframe, emakey, emavalue, 
@@ -2193,9 +2219,11 @@ class TradingHandler(BaseDBHandler):
                 status = EXCLUDED.status,
                 lastupdatedat = NOW()
         """, emaStateData)
+        logger.info(f"TRADING SCHEDULER: DB call completed to insert EMA states")
 
-    def _batchInsertRSIStates(self, cursor, rsiStateData: List[Tuple]):
+    def batchInsertRSIStates(self, cursor, rsiStateData: List[Tuple]):
         """Batch insert/update RSI states"""
+        logger.info(f"TRADING SCHEDULER: DB call started to insert RSI states")
         cursor.executemany("""
             INSERT INTO rsistates 
             (tokenaddress, pairaddress, timeframe, rsiinterval, rsiavailabletime, 
@@ -2221,9 +2249,11 @@ class TradingHandler(BaseDBHandler):
                 status = EXCLUDED.status,
                 lastupdatedat = NOW()
         """, rsiStateData)
+        logger.info(f"TRADING SCHEDULER: DB call completed to insert RSI states")
     
-    def _batchInsertAVWAPStates(self, cursor, avwapStateData: List[Tuple]):
+    def batchInsertAVWAPStates(self, cursor, avwapStateData: List[Tuple]):
         """Batch insert/update AVWAP states"""
+        logger.info(f"TRADING SCHEDULER: DB call started to insert AVWAP states")
         cursor.executemany("""
             INSERT INTO avwapstates 
             (tokenaddress, pairaddress, timeframe, avwap, cumulativepv, cumulativevolume, 
@@ -2238,6 +2268,7 @@ class TradingHandler(BaseDBHandler):
                 nextfetchtime = EXCLUDED.nextfetchtime,
                 lastupdatedat = NOW()
         """, avwapStateData)
+        logger.info(f"TRADING SCHEDULER: DB call completed to insert AVWAP states")
     
     def createInitialAlerts(self, tokenId: int, tokenAddress: str, pairAddress: str, 
                            timeframes: List[str]) -> bool:
@@ -2254,6 +2285,7 @@ class TradingHandler(BaseDBHandler):
             bool: True if successful
         """
         try:
+            logger.info(f"TRADING API :: Creating initial alerts for token {tokenAddress}")
             with self.conn_manager.transaction() as cursor:
                 alertData = []
                 for timeframe in timeframes:
@@ -2274,7 +2306,7 @@ class TradingHandler(BaseDBHandler):
                     ON CONFLICT (tokenaddress, timeframe) DO NOTHING
                 """, alertData)
                 
-                logger.info(f"Created {len(alertData)} initial alerts for token {tokenAddress}")
+                logger.info(f"TRADING API :: Created {len(alertData)} initial alerts for token {tokenAddress}")
                 return True
                 
         except Exception as e:
@@ -2293,6 +2325,8 @@ class TradingHandler(BaseDBHandler):
         """
         try:
             totalAlertsUpdated = 0
+            
+            logger.info(f"TRADING SCHEDULER :: Transaction initiated to persist alert data")
             
             with self.conn_manager.transaction() as cursor:
                 # Collect alert data for batch operations
@@ -2377,24 +2411,25 @@ class TradingHandler(BaseDBHandler):
                             lastupdatedat = NOW()
                     """, alertData)
                 
-                # Update candle trend/status
+                # Update candle trend/status using optimized temporary table method
                 if candleTrendStatusUpdates:
-                    cursor.executemany("""
-                        UPDATE ohlcvdetails 
-                        SET trend = %s, status = %s, trend12 = %s, status12 = %s
-                        WHERE tokenaddress = %s AND timeframe = %s AND unixtime = %s
-                    """, candleTrendStatusUpdates)
-                    logger.info(f"Updated trend/status for {len(candleTrendStatusUpdates)} candles")
+                    self.batchUpdateCandlesWithTempTableMultiColumn(
+                        cursor, 
+                        candleTrendStatusUpdates, 
+                        ['trend', 'status', 'trend12', 'status12']
+                    )
                 
-                logger.info(f"Batch persisted {totalAlertsUpdated} alerts")
+                logger.info(f"TRADING SCHEDULER :: Transaction completed to persist alert data")
                 return totalAlertsUpdated
                 
         except Exception as e:
-            logger.error(f"Error in batch persist alerts: {e}")
+            logger.info(f"TRADING SCHEDULER :: Error in batch persist alerts: {e}")
             return 0
     
     def getCurrentAlertStateAndNewCandles(self, tokenAddress: str = None) -> List['TrackedToken']:
         try:
+            logger.info(f"TRADING SCHEDULER :: Fetching alert state and new candles started")
+            
             with self.conn_manager.transaction() as cursor:
                 # Build where clause
                 whereClause = "WHERE tt.status = 1"
@@ -2621,10 +2656,144 @@ class TradingHandler(BaseDBHandler):
                             )
                             timeframeRecord.addOHLCVDetail(candle)
                 
+                logger.info(f"TRADING SCHEDULER :: Fetching alert state and new candles completed - found {len(trackedTokens)} tokens")
                 return list(trackedTokens.values())
                 
         except Exception as e:
-            logger.error(f"Error getting alerts for processing: {e}")
+            logger.info(f"TRADING SCHEDULER :: Error getting alerts for processing: {e}")
             return []
+
+    def batchUpdateCandlesWithTempTableMultiColumn(self, cursor, candleUpdates: List[Tuple], columnNames: List[str]) -> None:
+        """
+        OPTIMIZED: Batch update multiple candle columns using temporary tables for maximum performance
+        
+        This method replaces individual UPDATE statements with a single batch operation:
+        1. Create temporary table with update data
+        2. Insert all updates into temp table
+        3. Single UPDATE with JOIN to apply all changes at once
+        
+        Performance benefits:
+        - Reduces network round trips from N to 1
+        - Eliminates individual query parsing and planning overhead
+        - Uses PostgreSQL's optimized JOIN operations
+        - Temporary tables are memory-efficient and auto-cleanup
+        
+        Args:
+            cursor: Database cursor
+            candleUpdates: List of tuples (value1, value2, ..., tokenAddress, timeframe, unixTime)
+            columnNames: List of column names to update (e.g., ['trend', 'status', 'trend12', 'status12'])
+        """
+        if not candleUpdates:
+            return
+        
+        try:
+            # Step 1: Create temporary table for batch updates
+            logger.info(f"TRADING SCHEDULER :: Creating temporary table started for multi-column update")
+            tempTableName = f"temp_multi_column_updates"
+            
+            # Build column definitions
+            columnDefs = []
+            for col in columnNames:
+                columnDefs.append(f"{col} VARCHAR(20)")
+            columnDefs.extend([
+                "tokenaddress CHAR(44)",
+                "timeframe VARCHAR(10)",
+                "unixtime BIGINT"
+            ])
+            
+            cursor.execute(f"""
+                CREATE TEMPORARY TABLE {tempTableName} (
+                    {', '.join(columnDefs)}
+                ) ON COMMIT DROP
+            """)
+            logger.info(f"TRADING SCHEDULER :: Creating temporary table completed for multi-column update")
+            
+            # Step 2: Insert all updates into temporary table
+            logger.info(f"TRADING SCHEDULER :: Inserting updates into temporary table started for multi-column update")
+            placeholders = ', '.join(['%s'] * len(columnNames) + ['%s', '%s', '%s'])
+            cursor.executemany(f"""
+                INSERT INTO {tempTableName} ({', '.join(columnNames)}, tokenaddress, timeframe, unixtime)
+                VALUES ({placeholders})
+            """, candleUpdates)
+            logger.info(f"TRADING SCHEDULER :: Inserting updates into temporary table completed for multi-column update")
+            
+            # Step 3: Single batch UPDATE using JOIN
+            logger.info(f"TRADING SCHEDULER :: Updating ohlcvdetails table started for multi-column update")
+            setClause = ', '.join([f"{col} = t.{col}" for col in columnNames])
+            cursor.execute(f"""
+                UPDATE ohlcvdetails 
+                SET {setClause}
+                FROM {tempTableName} t
+                WHERE ohlcvdetails.tokenaddress = t.tokenaddress 
+                  AND ohlcvdetails.timeframe = t.timeframe 
+                  AND ohlcvdetails.unixtime = t.unixtime
+            """)
+            logger.info(f"TRADING SCHEDULER :: Updating ohlcvdetails table completed for multi-column update")
+            
+        except Exception as e:
+            logger.inf0(f"TRADING SCHEDULER :: Error in optimized multi-column batch update: {e}")
+            raise
+
+    def batchUpdateCandlesWithTempTable(self, cursor, candleUpdates: List[Tuple], columnName: str) -> None:
+        """
+        OPTIMIZED: Batch update candle values using temporary tables for maximum performance
+        
+        This method replaces individual UPDATE statements with a single batch operation:
+        1. Create temporary table with update data
+        2. Insert all updates into temp table
+        3. Single UPDATE with JOIN to apply all changes at once
+        
+        Performance benefits:
+        - Reduces network round trips from N to 1
+        - Eliminates individual query parsing and planning overhead
+        - Uses PostgreSQL's optimized JOIN operations
+        - Temporary tables are memory-efficient and auto-cleanup
+        
+        Args:
+            cursor: Database cursor
+            candleUpdates: List of tuples (value, tokenAddress, timeframe, unixTime)
+            columnName: Column name to update (e.g., 'vwapvalue', 'ema12value', etc.)
+        """
+        if not candleUpdates:
+            return
+        
+        try:
+            # Step 1: Create temporary table for batch updates
+            logger.info(f"TRADING SCHEDULER :: Creating temporary table started for {columnName}")
+            tempTableName = f"temp_{columnName}_updates"
+            cursor.execute(f"""
+                CREATE TEMPORARY TABLE {tempTableName} (
+                    {columnName} DECIMAL(20,8),
+                    tokenaddress CHAR(44),
+                    timeframe VARCHAR(10),
+                    unixtime BIGINT
+                ) ON COMMIT DROP
+            """)
+            logger.info(f"TRADING SCHEDULER :: Creating temporary table completed for {columnName}")
+            
+            # Step 2: Insert all updates into temporary table
+            logger.info(f"TRADING SCHEDULER :: Inserting updates into temporary table started for {columnName}")
+            cursor.executemany(f"""
+                INSERT INTO {tempTableName} ({columnName}, tokenaddress, timeframe, unixtime)
+                VALUES (%s, %s, %s, %s)
+            """, candleUpdates)
+            logger.info(f"TRADING SCHEDULER :: Inserting updates into temporary table completed for {columnName}")
+            
+            # Step 3: Single batch UPDATE using JOIN
+            logger.info(f"TRADING SCHEDULER :: Updating ohlcvdetails table started for {columnName}")
+            cursor.execute(f"""
+                UPDATE ohlcvdetails 
+                SET {columnName} = t.{columnName}
+                FROM {tempTableName} t
+                WHERE ohlcvdetails.tokenaddress = t.tokenaddress 
+                  AND ohlcvdetails.timeframe = t.timeframe 
+                  AND ohlcvdetails.unixtime = t.unixtime
+            """)
+            logger.info(f"TRADING SCHEDULER :: Updating ohlcvdetails table completed for {columnName}")
+
+            
+        except Exception as e:
+            logger.error(f"TRADING SCHEDULER :: Error in optimized batch update for {columnName}: {e}")
+            raise
 
     

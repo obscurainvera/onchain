@@ -334,10 +334,10 @@ class RSIProcessor:
                             pairCreatedTime: int) -> None:
         try:
             if not timeframeRecord.ohlcvDetails:
-                logger.warning(f"No candles available for RSI calculation: {tokenAddress} {timeframeRecord.timeframe}")
+                logger.warning(f"TRADING API :: No candles available for RSI {tokenAddress} - {timeframeRecord.timeframe}")
                 return
             
-            logger.info(f"Processing RSI for {tokenAddress} {timeframeRecord.timeframe} with {len(timeframeRecord.ohlcvDetails)} candles")
+            logger.info(f"TRADING API :: RSI calculation started for {tokenAddress} - {timeframeRecord.timeframe} ")
             
             # Get latest fetched time from candles
             latestFetchedAtTime = max(candle.unixTime for candle in timeframeRecord.ohlcvDetails)
@@ -347,11 +347,11 @@ class RSIProcessor:
             initialCandleStartTime = CommonUtil.calculateInitialStartTime(pairCreatedTime, timeframeRecord.timeframe)
             rsiAvailableTime = initialCandleStartTime + ((self.RSI_INTERVAL + 1) * timeframeInSeconds)
             
-            logger.info(f"RSI for {tokenAddress} {timeframeRecord.timeframe}: available at {rsiAvailableTime}, latest fetched: {latestFetchedAtTime}")
+            logger.info(f"TRADING API :: RSI for {tokenAddress} - {timeframeRecord.timeframe}: available at {rsiAvailableTime}, latest fetched: {latestFetchedAtTime}")
             
             # Check if we have enough data to calculate RSI
             if latestFetchedAtTime >= rsiAvailableTime:
-                logger.info(f"RSI data available for {tokenAddress} {timeframeRecord.timeframe}, calculating...")
+                logger.info(f"TRADING API :: RSI data available, calculation started for {tokenAddress} - {timeframeRecord.timeframe}")
                 
                 # Calculate RSI from candles
                 success = self.calculateFirstRSIFromCandles(
@@ -361,9 +361,11 @@ class RSIProcessor:
                 )
                 
                 if not success:
-                    logger.warning(f"Failed to calculate RSI for {tokenAddress} {timeframeRecord.timeframe}")
+                    logger.warning(f"TRADING API :: Failed to calculate RSI for {tokenAddress} - {timeframeRecord.timeframe}")
+                else:
+                    logger.info(f"TRADING API :: RSI calculation completed for {tokenAddress} - {timeframeRecord.timeframe}")
             else:
-                logger.info(f"RSI not yet available for {tokenAddress} {timeframeRecord.timeframe} - need data up to {rsiAvailableTime}, have up to {latestFetchedAtTime}")
+                logger.info(f"TRADING API :: RSI not available, will be processed when data reaches {rsiAvailableTime} for {tokenAddress} - {timeframeRecord.timeframe}")
                 # Create empty RSI state
                 rsiState = RSIState.createEmpty(
                     tokenAddress=tokenAddress,
@@ -375,12 +377,11 @@ class RSIProcessor:
                 )
                 
                 timeframeRecord.rsiState = rsiState
-                logger.info(f"Created RSI state with status NOT_AVAILABLE for {tokenAddress} {timeframeRecord.timeframe}")
             
-            logger.info(f"Completed RSI calculation for {tokenAddress} {timeframeRecord.timeframe}")
+            logger.info(f"TRADING API :: Completed RSI calculation for {tokenAddress} - {timeframeRecord.timeframe}")
         
         except Exception as e:
-            logger.error(f"Error calculating RSI in memory for {tokenAddress} {timeframeRecord.timeframe}: {e}", exc_info=True)
+            logger.error(f"TRADING API :: Error calculating RSI in memory for {tokenAddress} - {timeframeRecord.timeframe}: {e}", exc_info=True)
     
     
     def processRSI(self, rsiState: 'RSIState', candle: 'OHLCVDetails', previousClose: float) -> None:

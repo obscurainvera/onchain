@@ -338,10 +338,10 @@ class EMAProcessor:
     def calculateEMAInMemory(self, timeframeRecord, tokenAddress: str, pairAddress: str, pairCreatedTime: int) -> None:
         try:
             if not timeframeRecord.ohlcvDetails:
-                logger.warning(f"No candles available for EMA calculation: {tokenAddress} {timeframeRecord.timeframe}")
+                logger.warning(f"TRADING API :: No candles available for EMA {tokenAddress} - {timeframeRecord.timeframe}")
                 return
             
-            logger.info(f"Processing EMA for {tokenAddress} {timeframeRecord.timeframe} with {len(timeframeRecord.ohlcvDetails)} candles")
+            logger.info(f"TRADING API :: Processing EMA {tokenAddress} - {timeframeRecord.timeframe} with {len(timeframeRecord.ohlcvDetails)} candles")
             
             # Get the latest fetched time from candles (same logic as calcualteEMAForNewTokenFromAPI)
             latestFetchedAtTime = max(candle.unixTime for candle in timeframeRecord.ohlcvDetails)
@@ -353,11 +353,11 @@ class EMAProcessor:
                 initialCandleStartTime = self.calculateInitialCandleStartTime(pairCreatedTime, timeframeRecord.timeframe)
                 emaAvailableTime = initialCandleStartTime + (emaPeriod * timeframeInSeconds)
                 
-                logger.info(f"Processing EMA{emaPeriod} for {tokenAddress} {timeframeRecord.timeframe}: available at {emaAvailableTime}, latest fetched: {latestFetchedAtTime}")
+                logger.info(f"TRADING API :: Processing EMA{emaPeriod} {tokenAddress} - {timeframeRecord.timeframe}: available at {emaAvailableTime}, latest fetched: {latestFetchedAtTime}")
                 
                 # Check if we have enough data to calculate EMA (same logic as calcualteEMAForNewTokenFromAPI)
                 if latestFetchedAtTime >= emaAvailableTime:
-                    logger.info(f"EMA{emaPeriod} data available for {tokenAddress} {timeframeRecord.timeframe}, calculating...")
+                    logger.info(f"TRADING API :: EMA{emaPeriod} data available, calculation started for {tokenAddress} - {timeframeRecord.timeframe}")
                     
                     # Use the SHARED EMA calculation method - updates timeframeRecord directly
                     success = self.calcualteFirstEMAFromCandles(
@@ -366,9 +366,11 @@ class EMAProcessor:
                     )
                     
                     if not success:
-                        logger.warning(f"Failed to calculate EMA{emaPeriod} for {tokenAddress} {timeframeRecord.timeframe}: calculation returned False")
+                        logger.warning(f"TRADING API :: Failed to calculate EMA{emaPeriod} for {tokenAddress} - {timeframeRecord.timeframe}")
+                    else:
+                        logger.info(f"TRADING API :: EMA{emaPeriod} calculation completed for {tokenAddress} - {timeframeRecord.timeframe}")
                 else:
-                    logger.info(f"EMA{emaPeriod} not yet available for {tokenAddress} {timeframeRecord.timeframe} - need data up to {emaAvailableTime}, have up to {latestFetchedAtTime}")
+                    logger.info(f"TRADING API :: EMA{emaPeriod} not available, will be processed when data reaches {emaAvailableTime} for {tokenAddress} - {timeframeRecord.timeframe}")
                     
                     # Create EMA state with status 2 (AVAILABLE) and emaAvailableTime so scheduler can pick it up
                     emaState = EMAState(
@@ -392,11 +394,9 @@ class EMAProcessor:
                     elif emaPeriod == 34:
                         timeframeRecord.ema34State = emaState
                     
-                    logger.info(f"Created EMA{emaPeriod} state with status AVAILABLE for {tokenAddress} {timeframeRecord.timeframe} - will be processed when data reaches {emaAvailableTime}")
-            
-            logger.info(f"Completed EMA calculation for {tokenAddress} {timeframeRecord.timeframe}")
+            logger.info(f"TRADING API :: Completed EMA calculation for {tokenAddress} - {timeframeRecord.timeframe}")
             
         except Exception as e:
-            logger.error(f"Error calculating EMA in memory for {tokenAddress} {timeframeRecord.timeframe}: {e}")
+            logger.error(f"TRADING API :: Error calculating EMA in memory for {tokenAddress} - {timeframeRecord.timeframe}: {e}")
     
    
