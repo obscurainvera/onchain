@@ -43,7 +43,7 @@ class NotificationService:
             )
             
             if not notificationId:
-                logger.error("Failed to save notification to database")
+                logger.info("TRADING SCHEDULER :: NOTIFICATION :: Failed to save notification to database")
                 return False
             
             # Step 3: Send via Telegram
@@ -52,15 +52,15 @@ class NotificationService:
             # Step 4: Update status
             if success:
                 self.updateNotificationStatus(notificationId, "sent")
-                logger.info(f"Successfully sent notification {notificationId}")
+                logger.info(f"TRADING SCHEDULER :: NOTIFICATION :: Successfully sent notification {notificationId} - {notificationType.value}")
             else:
                 self.updateNotificationStatus(notificationId, "failed", "Failed to send to Telegram")
-                logger.error(f"Failed to send notification {notificationId}")
+                logger.info(f"TRADING SCHEDULER :: NOTIFICATION :: Failed to send notification {notificationId} - {notificationType.value}")
             
             return success
             
         except Exception as e:
-            logger.error(f"Error in sendNotification: {e}")
+            logger.info(f"TRADING SCHEDULER :: NOTIFICATION :: Error in sendNotification: {e}")
             return False
     
     def recordNotification(self, chatName: str, notificationType: NotificationType, 
@@ -84,7 +84,7 @@ class NotificationService:
             )
             
         except Exception as e:
-            logger.error(f"Error saving notification record: {e}")
+            logger.info(f"TRADING SCHEDULER :: NOTIFICATION :: Error saving notification record: {e}")
             return None
     
     
@@ -132,7 +132,7 @@ class NotificationService:
             return True
             
         except Exception as e:
-            logger.error(f"Error sending to Telegram: {e}")
+            logger.info(f"TRADING SCHEDULER :: NOTIFICATION :: Error sending to Telegram: {e}")
             return False
     
     def updateNotificationStatus(self, notificationId: int, status: str, 
@@ -147,7 +147,7 @@ class NotificationService:
             )
                 
         except Exception as e:
-            logger.error(f"Error updating notification status: {e}")
+            logger.info(f"TRADING SCHEDULER :: NOTIFICATION :: Error updating notification status: {e}")
     
     def getNotificationById(self, notificationId: int) -> Optional[dict]:
         """
@@ -162,5 +162,5 @@ class NotificationService:
         try:
             return self.notificationHandler.getNotificationById(notificationId)
         except Exception as e:
-            logger.error(f"Error getting notification by ID: {e}")
+            logger.info(f"TRADING SCHEDULER :: NOTIFICATION :: Error getting notification by ID: {e}")
             return None
