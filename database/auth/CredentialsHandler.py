@@ -138,7 +138,7 @@ class CredentialsHandler(BaseDBHandler):
                     return creds
                 return None
         except Exception as e:
-            logger.error(
+            logger.info(
                 f"Failed to get credentials for {serviceName} with type {credentialType}: {str(e)}"
             )
             return None
@@ -194,7 +194,7 @@ class CredentialsHandler(BaseDBHandler):
                 return dict(result) if result else None
 
         except Exception as e:
-            logger.error(
+            logger.info(
                 f"Failed to get next valid API key for {serviceName}: {str(e)}"
             )
             return None
@@ -238,7 +238,7 @@ class CredentialsHandler(BaseDBHandler):
                     )
                 return True
         except Exception as e:
-            logger.error(f"Failed to update API key credits for key {keyId}: {str(e)}")
+            logger.info(f"Failed to update API key credits for key {keyId}: {str(e)}")
             return False
 
     def resetCredentialsDueForReset(self) -> None:
@@ -253,7 +253,7 @@ class CredentialsHandler(BaseDBHandler):
                 logger.info(f"Reset {rowsAffected} credentials due for reset")
                 
         except Exception as e:
-            logger.error(f"Failed to reset credentials: {str(e)}")
+            logger.info(f"Failed to reset credentials: {str(e)}")
 
     def buildResetQuery(self, currentTime: datetime) -> tuple[str, list]:
         creditCases = []
