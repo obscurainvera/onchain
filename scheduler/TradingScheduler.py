@@ -28,7 +28,7 @@ class TradingScheduler:
         self.rsi_processor = RSIProcessor(self.trading_handler)
         self.alerts_processor = AlertsProcessor(self.trading_handler)
         self.current_time = int(time.time())
-        logger.info("Trading scheduler initialized with POJO-based flow and alerts")
+        
 
     def handleTradingUpdatesFromJob(self):
         try:

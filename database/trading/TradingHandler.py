@@ -70,8 +70,8 @@ class TradingHandler(BaseDBHandler):
                 name VARCHAR(100),
                 pairaddress CHAR(44) NOT NULL,
                 paircreatedtime BIGINT,
-                additionsource INTEGER DEFAULT 1 CHECK (additionsource IN (1, 2)),
-                status INTEGER DEFAULT 1 CHECK (status IN (1, 2)),
+                additionsource INTEGER DEFAULT 1,
+                status INTEGER DEFAULT 1,
                 enabledat TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
                 disabledat TIMESTAMP WITH TIME ZONE,
                 createdat TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
@@ -131,10 +131,7 @@ class TradingHandler(BaseDBHandler):
                 datasource VARCHAR(20) DEFAULT 'api',
                 createdat TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
                 lastupdatedat TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-                UNIQUE(tokenaddress, timeframe, unixtime),
-                CHECK (highprice >= lowprice),
-                CHECK (highprice >= openprice AND highprice >= closeprice),
-                CHECK (lowprice <= openprice AND lowprice <= closeprice)
+                UNIQUE(tokenaddress, timeframe, unixtime)
             )
         """))
         
@@ -150,7 +147,7 @@ class TradingHandler(BaseDBHandler):
                 nextfetchtime BIGINT,
                 emaavailabletime BIGINT,
                 paircreatedtime BIGINT,
-                status INTEGER DEFAULT 1 CHECK (status IN (1, 2)),
+                status INTEGER DEFAULT 1,
                 createdat TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
                 lastupdatedat TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
                 PRIMARY KEY (tokenaddress, timeframe, emakey)
@@ -251,7 +248,7 @@ class TradingHandler(BaseDBHandler):
                 lastupdatedunix BIGINT,
                 nextfetchtime BIGINT,
                 paircreatedtime BIGINT,
-                status INTEGER DEFAULT 1 CHECK (status IN (1, 2)),
+                status INTEGER DEFAULT 1,
                 createdat TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
                 lastupdatedat TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
                 UNIQUE(tokenaddress, pairaddress, timeframe)
@@ -1481,15 +1478,15 @@ class TradingHandler(BaseDBHandler):
                 # OPTIMIZED: Use temporary tables for candle updates
                 if ema12CandleUpdates:
                     self.batchUpdateCandlesWithTempTable(cursor, ema12CandleUpdates, 'ema12value')
-                    logger.info(f"Optimized batch updated {len(ema12CandleUpdates)} EMA12 candle values")
+                    logger.info(f"TRADING SCHEDULER :: Batch updated {len(ema12CandleUpdates)} EMA12 candle values")
                 
                 if ema21CandleUpdates:
                     self.batchUpdateCandlesWithTempTable(cursor, ema21CandleUpdates, 'ema21value')
-                    logger.info(f"Optimized batch updated {len(ema21CandleUpdates)} EMA21 candle values")
+                    logger.info(f"TRADING SCHEDULER :: Batch updated {len(ema21CandleUpdates)} EMA21 candle values")
                 
                 if ema34CandleUpdates:
                     self.batchUpdateCandlesWithTempTable(cursor, ema34CandleUpdates, 'ema34value')
-                    logger.info(f"Optimized batch updated {len(ema34CandleUpdates)} EMA34 candle values")
+                    logger.info(f"TRADING SCHEDULER :: Batch updated {len(ema34CandleUpdates)} EMA34 candle values")
                 
                 logger.info(f"TRADING SCHEDULER :: Transaction completed to persist EMA data")
             return totalEMAStatesUpdated
@@ -1798,7 +1795,6 @@ class TradingHandler(BaseDBHandler):
                 # OPTIMIZED: Use temporary table for candle updates
                 if avwapCandleUpdates:
                     self.batchUpdateCandlesWithTempTable(cursor, avwapCandleUpdates, 'avwapvalue')
-                    logger.info(f"Optimized batch updated {len(avwapCandleUpdates)} AVWAP candle values")
                 
                 logger.info(f"TRADING SCHEDULER :: Transaction completed to persist AVWAP data")
                 return totalAVWAPStatesUpdated
@@ -2136,7 +2132,7 @@ class TradingHandler(BaseDBHandler):
 
     def batchUpdateTimeframeMetadata(self, cursor, timeframeMetadataData: List[Tuple]):
         """Batch update timeframe metadata"""
-        logger.info(f"TRADING SCHEDULER: DB call started to update timeframe metadata")
+        logger.info(f"TRADING SCHEDULER :: DB call to update timeframe metadata - started")
         cursor.executemany("""
             INSERT INTO timeframemetadata 
             (tokenaddress, pairaddress, timeframe, lastfetchedat, nextfetchat, createdat, lastupdatedat)
@@ -2147,11 +2143,11 @@ class TradingHandler(BaseDBHandler):
                 nextfetchat = EXCLUDED.nextfetchat,
                 lastupdatedat = NOW()
         """, timeframeMetadataData)
-        logger.info(f"TRADING SCHEDULER: DB call completed to update timeframe metadata")
+        logger.info(f"TRADING SCHEDULER :: DB call to update timeframe metadata - completed")
 
     def batchInsertCandles(self, cursor, candleData: List[Tuple]):
         """Batch insert candles with indicator values"""
-        logger.info(f"TRADING SCHEDULER: DB call started to insert candles")
+        logger.info(f"TRADING SCHEDULER :: DB call to insert candles - started")
         cursor.executemany("""
             INSERT INTO ohlcvdetails 
             (timeframeid, tokenaddress, pairaddress, timeframe, unixtime, timebucket, 
@@ -2178,11 +2174,11 @@ class TradingHandler(BaseDBHandler):
                 status12 = EXCLUDED.status12,
                 lastupdatedat = NOW()
         """, candleData)
-        logger.info(f"TRADING SCHEDULER: DB call completed to insert candles")
+        logger.info(f"TRADING SCHEDULER :: DB call to insert candles - completed")
 
     def batchInsertVWAPSessions(self, cursor, vwapSessionData: List[Tuple]):
         """Batch insert/update VWAP sessions"""
-        logger.info(f"TRADING SCHEDULER: DB call started to insert VWAP sessions")
+        logger.info(f"TRADING SCHEDULER :: DB call to insert VWAP sessions - started")
         cursor.executemany("""
             INSERT INTO vwapsessions 
             (tokenaddress, pairaddress, timeframe, sessionstartunix, sessionendunix,
@@ -2200,11 +2196,11 @@ class TradingHandler(BaseDBHandler):
                 nextcandlefetch = EXCLUDED.nextcandlefetch,
                 lastupdatedat = NOW()
         """, vwapSessionData)
-        logger.info(f"TRADING SCHEDULER: DB call completed to insert VWAP sessions")
+        logger.info(f"TRADING SCHEDULER :: DB call to insert VWAP sessions - completed")
 
     def batchInsertEMAStates(self, cursor, emaStateData: List[Tuple]):
         """Batch insert/update EMA states"""
-        logger.info(f"TRADING SCHEDULER: DB call started to insert EMA states")
+        logger.info(f"TRADING SCHEDULER :: DB call to insert EMA states - started")
         cursor.executemany("""
             INSERT INTO emastates 
             (tokenaddress, pairaddress, timeframe, emakey, emavalue, 
@@ -2219,11 +2215,11 @@ class TradingHandler(BaseDBHandler):
                 status = EXCLUDED.status,
                 lastupdatedat = NOW()
         """, emaStateData)
-        logger.info(f"TRADING SCHEDULER: DB call completed to insert EMA states")
+        logger.info(f"TRADING SCHEDULER :: DB call to insert EMA states - completed")
 
     def batchInsertRSIStates(self, cursor, rsiStateData: List[Tuple]):
         """Batch insert/update RSI states"""
-        logger.info(f"TRADING SCHEDULER: DB call started to insert RSI states")
+        logger.info(f"TRADING SCHEDULER :: DB call to insert RSI states - started")
         cursor.executemany("""
             INSERT INTO rsistates 
             (tokenaddress, pairaddress, timeframe, rsiinterval, rsiavailabletime, 
@@ -2249,11 +2245,11 @@ class TradingHandler(BaseDBHandler):
                 status = EXCLUDED.status,
                 lastupdatedat = NOW()
         """, rsiStateData)
-        logger.info(f"TRADING SCHEDULER: DB call completed to insert RSI states")
+        logger.info(f"TRADING SCHEDULER :: DB call to insert RSI states - completed")
     
     def batchInsertAVWAPStates(self, cursor, avwapStateData: List[Tuple]):
         """Batch insert/update AVWAP states"""
-        logger.info(f"TRADING SCHEDULER: DB call started to insert AVWAP states")
+        logger.info(f"TRADING SCHEDULER :: DB call to insert AVWAP states - started")
         cursor.executemany("""
             INSERT INTO avwapstates 
             (tokenaddress, pairaddress, timeframe, avwap, cumulativepv, cumulativevolume, 
@@ -2268,7 +2264,7 @@ class TradingHandler(BaseDBHandler):
                 nextfetchtime = EXCLUDED.nextfetchtime,
                 lastupdatedat = NOW()
         """, avwapStateData)
-        logger.info(f"TRADING SCHEDULER: DB call completed to insert AVWAP states")
+        logger.info(f"TRADING SCHEDULER :: DB call to insert AVWAP states - completed")
     
     def createInitialAlerts(self, tokenId: int, tokenAddress: str, pairAddress: str, 
                            timeframes: List[str]) -> bool:
@@ -2310,7 +2306,7 @@ class TradingHandler(BaseDBHandler):
                 return True
                 
         except Exception as e:
-            logger.info(f"Error creating initial alerts: {e}")
+            logger.info(f"TRADING SCHEDULER :: Error creating initial alerts: {e}")
             return False
     
     def batchPersistAlerts(self, trackedTokens: List['TrackedToken']) -> int:
@@ -2759,7 +2755,7 @@ class TradingHandler(BaseDBHandler):
         
         try:
             # Step 1: Create temporary table for batch updates
-            logger.info(f"TRADING SCHEDULER :: Creating temporary table started for {columnName}")
+            logger.info(f"TRADING SCHEDULER :: Creating temporary table for {columnName} - started")
             tempTableName = f"temp_{columnName}_updates"
             cursor.execute(f"""
                 CREATE TEMPORARY TABLE {tempTableName} (
@@ -2769,18 +2765,18 @@ class TradingHandler(BaseDBHandler):
                     unixtime BIGINT
                 ) ON COMMIT DROP
             """)
-            logger.info(f"TRADING SCHEDULER :: Creating temporary table completed for {columnName}")
+            logger.info(f"TRADING SCHEDULER :: Creating temporary table for {columnName} - completed")
             
             # Step 2: Insert all updates into temporary table
-            logger.info(f"TRADING SCHEDULER :: Inserting updates into temporary table started for {columnName}")
+            logger.info(f"TRADING SCHEDULER :: Inserting updates into temporary table for {columnName} - started")
             cursor.executemany(f"""
                 INSERT INTO {tempTableName} ({columnName}, tokenaddress, timeframe, unixtime)
                 VALUES (%s, %s, %s, %s)
             """, candleUpdates)
-            logger.info(f"TRADING SCHEDULER :: Inserting updates into temporary table completed for {columnName}")
+            logger.info(f"TRADING SCHEDULER :: Inserting updates into temporary table for {columnName} - completed")
             
             # Step 3: Single batch UPDATE using JOIN
-            logger.info(f"TRADING SCHEDULER :: Updating ohlcvdetails table started for {columnName}")
+            logger.info(f"TRADING SCHEDULER :: Updating ohlcvdetails table for {columnName} - started")
             cursor.execute(f"""
                 UPDATE ohlcvdetails 
                 SET {columnName} = t.{columnName}
@@ -2789,11 +2785,11 @@ class TradingHandler(BaseDBHandler):
                   AND ohlcvdetails.timeframe = t.timeframe 
                   AND ohlcvdetails.unixtime = t.unixtime
             """)
-            logger.info(f"TRADING SCHEDULER :: Updating ohlcvdetails table completed for {columnName}")
+            logger.info(f"TRADING SCHEDULER :: Updating ohlcvdetails table for {columnName} - completed")
 
             
         except Exception as e:
-            logger.info(f"TRADING SCHEDULER :: Error in optimized batch update for {columnName}: {e}")
+            logger.info(f"TRADING SCHEDULER :: Error in optimized batch update for {columnName} - {e}")
             raise
 
     

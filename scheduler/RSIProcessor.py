@@ -84,6 +84,7 @@ class RSIProcessor:
             trackedTokens: List of TrackedToken POJOs with candles and RSI state
         """
         try:
+            logger.info(f"TRADING SCHEDULER :: RSI calculation for {len(trackedTokens)} tracked tokens - started")
             totalProcessed = 0
             
             for trackedToken in trackedTokens:
@@ -101,7 +102,7 @@ class RSIProcessor:
                     )
                     
                     if rsiCalculationType == RSICalculationType.NOT_AVAILABLE_INSUFFICIENT:
-                        logger.debug(f"Insufficient data for RSI: {trackedToken.symbol} {timeframeRecord.timeframe}")
+                        logger.info(f"TRADING SCHEDULER :: Insufficient data for RSI: {trackedToken.symbol} - {timeframeRecord.timeframe}")
                         continue
                     
                     # Calculate RSI based on type
@@ -120,10 +121,10 @@ class RSIProcessor:
                     
                     totalProcessed += 1
             
-            logger.info(f"Processed RSI calculations for {totalProcessed} timeframe records")
+            logger.info(f"TRADING SCHEDULER :: RSI calculation for {totalProcessed} timeframe records - completed")
         
         except Exception as e:
-            logger.info(f"Error processing RSI calculations: {e}", exc_info=True)
+            logger.info(f"TRADING SCHEDULER :: Error processing RSI calculations: {e}", exc_info=True)
     
     def findRSICalculationType(self, status: int, lastFetchedAt: int, rsiAvailableAt: int) -> str:
         """
@@ -162,8 +163,10 @@ class RSIProcessor:
         try:
             candles = timeframeRecord.ohlcvDetails
             if len(candles) < self.RSI_INTERVAL + 1:
-                logger.warning(f"Not enough candles for first RSI calculation: {tokenAddress} {timeframeRecord.timeframe}")
+                logger.info(f"TRADING SCHEDULER :: Not enough candles for first RSI calculation: {tokenAddress} - {timeframeRecord.timeframe}")
                 return
+
+            logger.info(f"TRADING SCHEDULER :: First RSI calculation for {tokenAddress} - {timeframeRecord.timeframe} - started")
             
             # Calculate first RSI using all candles
             timeframeInSeconds = CommonUtil.getTimeframeSeconds(timeframeRecord.timeframe)
@@ -174,12 +177,12 @@ class RSIProcessor:
             )
             
             if success:
-                logger.info(f"First RSI calculation completed for {tokenAddress} {timeframeRecord.timeframe}")
+                logger.info(f"TRADING SCHEDULER :: First RSI calculation for {tokenAddress} - {timeframeRecord.timeframe} - completed")
             else:
-                logger.warning(f"First RSI calculation failed for {tokenAddress} {timeframeRecord.timeframe}")
+                logger.info(f"TRADING SCHEDULER :: First RSI calculation for {tokenAddress} - {timeframeRecord.timeframe} - failed")
         
         except Exception as e:
-            logger.info(f"Error in first RSI calculation: {e}", exc_info=True)
+            logger.info(f"TRADING SCHEDULER :: Error in first RSI calculation: {e}", exc_info=True)
     
     def performIncrementalRSIUpdate(self, timeframeRecord: 'TimeframeRecord',
                                     tokenAddress: str, pairAddress: str) -> None:
@@ -258,7 +261,7 @@ class RSIProcessor:
         try:
             candles = timeframeRecord.ohlcvDetails
             if len(candles) <= self.RSI_INTERVAL + 1:
-                logger.warning(f"Not enough candles for RSI: {tokenAddress} {timeframe}")
+                logger.info(f"TRADING SCHEDULER :: Not enough candles for RSI: {tokenAddress} - {timeframe}")
                 return False
             
             # ==================== STEP 1: Calculate Initial RSI (SMA Method) ====================
@@ -280,7 +283,7 @@ class RSIProcessor:
             # Update first RSI candle (candle at index RSI_INTERVAL)
             candles[self.RSI_INTERVAL].rsiValue = firstRSI
             
-            logger.info(f"First RSI value calculated: {firstRSI:.2f} for {tokenAddress} {timeframe}")
+            logger.info(f"TRADING SCHEDULER :: First RSI value calculated: {firstRSI:.2f} for {tokenAddress} - {timeframe}")
             
             # ==================== STEP 2: Create RSI State with Initial Values ====================
             rsiState = RSIState(
