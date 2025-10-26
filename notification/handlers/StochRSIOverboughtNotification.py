@@ -28,7 +28,7 @@ class StochRSIOverboughtNotification:
         try:
             chatCredentials = NotificationUtil.getChatCredentials(chatName)
             if not chatCredentials:
-                logger.error(f"No credentials found for chat: {chatName}")
+                logger.info(f"TRADING SCHEDULER :: NOTIFICATION :: No credentials found for chat: {chatName}")
                 return False
             
             stochRSIOverboughtData = StochRSIOverboughtNotification.createStochRSIOverboughtData(
@@ -47,7 +47,7 @@ class StochRSIOverboughtNotification:
             return success
             
         except Exception as e:
-            logger.error(f"Error sending Stochastic RSI overbought notification for {trackedToken.symbol}: {e}")
+            logger.info(f"TRADING SCHEDULER :: NOTIFICATION :: Error sending Stochastic RSI overbought notification for {trackedToken.symbol} - {NotificationType.STOCH_RSI_OVERBOUGHT.value}: {e}")
             return False
     
     @staticmethod

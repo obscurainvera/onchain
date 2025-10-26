@@ -166,7 +166,7 @@ class VWAPProcessor:
                 logger.info(f"TRADING SCHEDULER :: Calculated VWAP for {tokenAddress} - {timeframeRecord.timeframe}: {timeframeRecord.vwapSession.currentVWAP:.8f}")
             
         except Exception as e:
-            logger.error(f"TRADING SCHEDULER :: Error calculating VWAP for {tokenAddress} - {timeframeRecord.timeframe}: {e}")
+            logger.info(f"TRADING SCHEDULER :: Error calculating VWAP for {tokenAddress} - {timeframeRecord.timeframe}: {e}")
 
     def calculateVWAPInMemory(self, timeframeRecord, tokenAddress: str, pairAddress: str) -> None:
         try:
@@ -238,6 +238,6 @@ class VWAPProcessor:
             logger.info(f"TRADING API :: Calculated VWAP for {tokenAddress} - {timeframeRecord.timeframe}: {timeframeRecord.vwapSession.currentVWAP:.8f} (from {len(todayCandles)} today's candles)")
             
         except Exception as e:
-            logger.error(f"TRADING API :: Error calculating VWAP in memory for {tokenAddress} - {timeframeRecord.timeframe}: {e}")
+            logger.info(f"TRADING API :: Error calculating VWAP in memory for {tokenAddress} - {timeframeRecord.timeframe}: {e}")
     
     

@@ -106,7 +106,7 @@ class AVWAPProcessor:
             logger.info(f"TRADING API :: AVWAP calculation completed for {tokenAddress} - {timeframeRecord.timeframe}: {timeframeRecord.avwapState.avwap:.8f}")
             
         except Exception as e:
-            logger.error(f"TRADING API :: Error calculating AVWAP for {tokenAddress} - {timeframeRecord.timeframe}: {e}")
+            logger.info(f"TRADING API :: Error calculating AVWAP for {tokenAddress} - {timeframeRecord.timeframe}: {e}")
 
     def calculateAVWAPForAllTrackedTokens(self, trackedTokens: List['TrackedToken']) -> None:
         
@@ -125,7 +125,7 @@ class AVWAPProcessor:
             logger.info(f"Processed AVWAP calculations for {totalProcessed} timeframe records using POJOs")
         
         except Exception as e:
-            logger.error(f"Error processing AVWAP calculations with POJOs: {e}")
+            logger.info(f"Error processing AVWAP calculations with POJOs: {e}")
 
     def calculateAVWAPIncrementalWithPOJOs(self, timeframeRecord, tokenAddress: str, pairAddress: str) -> None:
         try:
@@ -179,5 +179,5 @@ class AVWAPProcessor:
             logger.info(f"Updated AVWAP for {tokenAddress} {timeframeRecord.timeframe}: {avwapState.avwap:.8f} (processed {len(newCandles)} new candles)")
             
         except Exception as e:
-            logger.error(f"Error calculating AVWAP incrementally with POJOs for {tokenAddress} {timeframeRecord.timeframe}: {e}")
+            logger.info(f"Error calculating AVWAP incrementally with POJOs for {tokenAddress} {timeframeRecord.timeframe}: {e}")
     

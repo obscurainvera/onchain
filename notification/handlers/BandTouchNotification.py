@@ -63,7 +63,7 @@ class BandTouchNotification:
         """
         try:
             if not ChatCredentials.isValidChatName(chatName):
-                logger.error(f"Invalid chat name: {chatName}")
+                logger.info(f"TRADING SCHEDULER :: NOTIFICATION :: Invalid chat name: {chatName}")
                 return False
 
             # Check if we should send notification (only first and second touches)
@@ -73,7 +73,7 @@ class BandTouchNotification:
 
             chatCredentials = NotificationUtil.getChatCredentials(chatName)
             if not chatCredentials:
-                logger.error(f"No credentials found for chat: {chatName}")
+                logger.info(f"TRADING SCHEDULER :: NOTIFICATION :: No credentials found for chat: {chatName}")
                 return False
 
             notificationService = NotificationService()
@@ -96,7 +96,7 @@ class BandTouchNotification:
                 if tokenPrice:
                     marketCap = tokenPrice.marketCap
             except Exception as e:
-                logger.warning(f"Failed to fetch market cap for {trackedToken.symbol}: {e}")
+                logger.info(f"TRADING SCHEDULER :: NOTIFICATION :: Failed to fetch market cap for {trackedToken.symbol}: {e}")
 
             bandTouchData = BandTouch.Data(
                 symbol=trackedToken.symbol,
@@ -130,10 +130,10 @@ class BandTouchNotification:
             if success:
                 logger.info(f"Band touch notification sent for {trackedToken.symbol} {timeframeRecord.timeframe} (touch #{alert.touchCount})")
             else:
-                logger.error(f"Failed to send band touch notification for {trackedToken.symbol} {timeframeRecord.timeframe}")
+                logger.info(f"Failed to send band touch notification for {trackedToken.symbol} {timeframeRecord.timeframe}")
 
             return success
 
         except Exception as e:
-            logger.error(f"Error sending band touch notification for {trackedToken.symbol}: {e}")
+            logger.info(f"TRADING SCHEDULER :: NOTIFICATION :: Error sending band touch notification for {trackedToken.symbol} - {NotificationType.BAND_TOUCH.value}: {e}")
             return False

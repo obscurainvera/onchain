@@ -30,7 +30,7 @@ class BearishCrossNotification:
             
             chatCredentials = NotificationUtil.getChatCredentials(chatName)
             if not chatCredentials:
-                logger.error(f"No credentials found for chat: {chatName}")
+                logger.info(f"TRADING SCHEDULER :: NOTIFICATION :: No credentials found for chat: {chatName}")
                 return False
             
             bearishData = BearishCrossNotification.createBearishCrossData(trackedToken, timeframeRecord, candle, shortMa, longMa)
@@ -47,7 +47,7 @@ class BearishCrossNotification:
             return success
             
         except Exception as e:
-            logger.error(f"Error sending bearish cross notification for {trackedToken.symbol}: {e}")
+            logger.info(f"TRADING SCHEDULER :: NOTIFICATION :: Error sending bearish cross notification for {trackedToken.symbol} - {NotificationType.BEARISH_CROSS.value}: {e}")
             return False
     
     @staticmethod
@@ -61,7 +61,7 @@ class BearishCrossNotification:
             if tokenPrice:
                 marketCap = tokenPrice.marketCap
         except Exception as e:
-            logger.warning(f"Failed to fetch market cap for {trackedToken.symbol}: {e}")
+            logger.info(f"TRADING SCHEDULER :: NOTIFICATION :: Failed to fetch market cap for {trackedToken.symbol}: {e}")
         
         return BearishCross.Data(
             symbol=trackedToken.symbol,
