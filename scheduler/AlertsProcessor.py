@@ -369,7 +369,7 @@ class AlertsProcessor:
             return f"{orderCode}_{positionCode}"
             
         except Exception as e:
-            logger.error(f"Error calculating status for candle at {candle.unixTime}: {e}")
+            logger.info(f"TRADING SCHEDULER :: Error calculating status for candle at {candle.unixTime}: {e}")
             return "ERROR_NA"
     
     def calculatePositionCode(self, closePrice: float, lowPrice: float, highPrice: float, 
@@ -508,15 +508,26 @@ class AlertsProcessor:
     
     
     def processAlertsForToken(self, trackedToken: 'TrackedToken') -> None:
-        for timeframeRecord in trackedToken.timeframeRecords: #processing timeframes in a token one by one
-            alert = self.processTimeframeAlert(trackedToken,timeframeRecord)
-            if alert:
-                timeframeRecord.alert = alert
+        try:
+            logger.info(f"TRADING SCHEDULER :: Processing alerts for token {trackedToken.symbol} started")
+            
+            for timeframeRecord in trackedToken.timeframeRecords: #processing timeframes in a token one by one
+                alert = self.processTimeframeAlert(trackedToken,timeframeRecord)
+                if alert:
+                    timeframeRecord.alert = alert
+            
+            logger.info(f"TRADING SCHEDULER :: Processing alerts for token {trackedToken.symbol} completed")
+            
+        except Exception as e:
+            logger.info(f"TRADING SCHEDULER :: Error processing alerts for token {trackedToken.symbol}: {e}")
     
     def processTimeframeAlert(self, trackedToken: 'TrackedToken', timeframeRecord: 'TimeframeRecord') -> Optional[Alert]:
         try:
             if not timeframeRecord.ohlcvDetails:
+                logger.info(f"TRADING SCHEDULER :: No candles available for alert processing {trackedToken.symbol} - {timeframeRecord.timeframe}")
                 return None
+            
+            logger.info(f"TRADING SCHEDULER :: Processing timeframe alert {trackedToken.symbol} - {timeframeRecord.timeframe} with {len(timeframeRecord.ohlcvDetails)} candles")
             
             existingAlert = timeframeRecord.alert if hasattr(timeframeRecord, 'alert') else None
             
@@ -538,31 +549,30 @@ class AlertsProcessor:
             
             # Process candles chronologically
             for candle in timeframeRecord.ohlcvDetails:
-                if not self.areIndicatorsReady(candle, timeframeRecord): 
+                if not self.areIndicatorsReady(candle, timeframeRecord):
+                    logger.info(f"TRADING SCHEDULER :: Indicators not ready for {trackedToken.symbol} - {timeframeRecord.timeframe} - {candle.unixTime}")
                     continue
                 
-                # Calculate trend
+                
                 currentTrend = self.calculateTrend(candle.ema21Value, candle.ema34Value)
                 currentTrend12 = self.calculateTrend(candle.ema12Value, candle.ema21Value)
-                # Calculate status
                 currentStatus = self.calculateStatus(candle, candle.ema21Value, candle.ema34Value, 'EMA21', 'EMA34')
                 currentStatus12 = self.calculateStatus(candle, candle.ema12Value, candle.ema21Value, 'EMA12', 'EMA21')
                 
                 
-                # Handle crosses and touches using generic function
-                # Process EMA 21/34 notifications
+            
                 self.processAlertNotifications(
                     existingAlert, candle, previousTrend, currentTrend, 
                     previousTrend12, currentTrend12, trackedToken, timeframeRecord, 'ema23'
                 )
                 
-                # Process EMA 12/21 notifications
+                
                 self.processAlertNotifications(
                     existingAlert, candle, previousTrend, currentTrend, 
                     previousTrend12, currentTrend12, trackedToken, timeframeRecord, 'ema12'
                 )
 
-                # Process AVWAP breakout alert
+               
                 self.processAVWAPBreakoutAlert(existingAlert, candle, trackedToken, timeframeRecord)
                 
                 # Process Stochastic RSI oversold confluence alert for EMA 21/34
@@ -613,10 +623,11 @@ class AlertsProcessor:
                 previousTrend = currentTrend
                 previousTrend12 = currentTrend12
             
+            logger.info(f"TRADING SCHEDULER :: Completed timeframe alert processing {trackedToken.tokenAddress} - {timeframeRecord.timeframe}")
             return existingAlert
             
         except Exception as e:
-            logger.error(f"Error processing timeframe alert for {tokenAddress} {timeframeRecord.timeframe}: {e}")
+            logger.error(f"TRADING SCHEDULER :: Error processing timeframe alert for {trackedToken.tokenAddress} - {timeframeRecord.timeframe}: {e}")
             return None
     
     def areIndicatorsReady(self, candle: 'OHLCVDetails', timeframeRecord: 'TimeframeRecord') -> bool:
@@ -676,10 +687,13 @@ class AlertsProcessor:
         return False
     
     def processAlertsFromScheduler(self, trackedTokens: List['TrackedToken']) -> None:
-            for trackedToken in trackedTokens: #processing tokens one by one
-                self.processAlertsForToken(trackedToken)
-                
+       
+        logger.info(f"TRADING SCHEDULER :: Processing alerts for {len(trackedTokens)} tokens started")
         
+        for trackedToken in trackedTokens: #processing tokens one by one
+            self.processAlertsForToken(trackedToken)
+        
+        logger.info(f"TRADING SCHEDULER :: Processing alerts for {len(trackedTokens)} tokens completed")
     
     def createInitialAlerts(self, tokenAddress: str, pairAddress: str, 
                            tokenId: int, timeframes: List[str]) -> List[Alert]:

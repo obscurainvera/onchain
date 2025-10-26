@@ -2326,6 +2326,8 @@ class TradingHandler(BaseDBHandler):
         try:
             totalAlertsUpdated = 0
             
+            logger.info(f"TRADING SCHEDULER :: Transaction initiated to persist alert data")
+            
             with self.conn_manager.transaction() as cursor:
                 # Collect alert data for batch operations
                 alertData = []
@@ -2409,24 +2411,25 @@ class TradingHandler(BaseDBHandler):
                             lastupdatedat = NOW()
                     """, alertData)
                 
-                # Update candle trend/status
+                # Update candle trend/status using optimized temporary table method
                 if candleTrendStatusUpdates:
-                    cursor.executemany("""
-                        UPDATE ohlcvdetails 
-                        SET trend = %s, status = %s, trend12 = %s, status12 = %s
-                        WHERE tokenaddress = %s AND timeframe = %s AND unixtime = %s
-                    """, candleTrendStatusUpdates)
-                    logger.info(f"Updated trend/status for {len(candleTrendStatusUpdates)} candles")
+                    self.batchUpdateCandlesWithTempTableMultiColumn(
+                        cursor, 
+                        candleTrendStatusUpdates, 
+                        ['trend', 'status', 'trend12', 'status12']
+                    )
                 
-                logger.info(f"Batch persisted {totalAlertsUpdated} alerts")
+                logger.info(f"TRADING SCHEDULER :: Transaction completed to persist alert data")
                 return totalAlertsUpdated
                 
         except Exception as e:
-            logger.error(f"Error in batch persist alerts: {e}")
+            logger.info(f"TRADING SCHEDULER :: Error in batch persist alerts: {e}")
             return 0
     
     def getCurrentAlertStateAndNewCandles(self, tokenAddress: str = None) -> List['TrackedToken']:
         try:
+            logger.info(f"TRADING SCHEDULER :: Fetching alert state and new candles started")
+            
             with self.conn_manager.transaction() as cursor:
                 # Build where clause
                 whereClause = "WHERE tt.status = 1"
@@ -2653,11 +2656,83 @@ class TradingHandler(BaseDBHandler):
                             )
                             timeframeRecord.addOHLCVDetail(candle)
                 
+                logger.info(f"TRADING SCHEDULER :: Fetching alert state and new candles completed - found {len(trackedTokens)} tokens")
                 return list(trackedTokens.values())
                 
         except Exception as e:
-            logger.error(f"Error getting alerts for processing: {e}")
+            logger.info(f"TRADING SCHEDULER :: Error getting alerts for processing: {e}")
             return []
+
+    def batchUpdateCandlesWithTempTableMultiColumn(self, cursor, candleUpdates: List[Tuple], columnNames: List[str]) -> None:
+        """
+        OPTIMIZED: Batch update multiple candle columns using temporary tables for maximum performance
+        
+        This method replaces individual UPDATE statements with a single batch operation:
+        1. Create temporary table with update data
+        2. Insert all updates into temp table
+        3. Single UPDATE with JOIN to apply all changes at once
+        
+        Performance benefits:
+        - Reduces network round trips from N to 1
+        - Eliminates individual query parsing and planning overhead
+        - Uses PostgreSQL's optimized JOIN operations
+        - Temporary tables are memory-efficient and auto-cleanup
+        
+        Args:
+            cursor: Database cursor
+            candleUpdates: List of tuples (value1, value2, ..., tokenAddress, timeframe, unixTime)
+            columnNames: List of column names to update (e.g., ['trend', 'status', 'trend12', 'status12'])
+        """
+        if not candleUpdates:
+            return
+        
+        try:
+            # Step 1: Create temporary table for batch updates
+            logger.info(f"TRADING SCHEDULER :: Creating temporary table started for multi-column update")
+            tempTableName = f"temp_multi_column_updates"
+            
+            # Build column definitions
+            columnDefs = []
+            for col in columnNames:
+                columnDefs.append(f"{col} VARCHAR(20)")
+            columnDefs.extend([
+                "tokenaddress CHAR(44)",
+                "timeframe VARCHAR(10)",
+                "unixtime BIGINT"
+            ])
+            
+            cursor.execute(f"""
+                CREATE TEMPORARY TABLE {tempTableName} (
+                    {', '.join(columnDefs)}
+                ) ON COMMIT DROP
+            """)
+            logger.info(f"TRADING SCHEDULER :: Creating temporary table completed for multi-column update")
+            
+            # Step 2: Insert all updates into temporary table
+            logger.info(f"TRADING SCHEDULER :: Inserting updates into temporary table started for multi-column update")
+            placeholders = ', '.join(['%s'] * len(columnNames) + ['%s', '%s', '%s'])
+            cursor.executemany(f"""
+                INSERT INTO {tempTableName} ({', '.join(columnNames)}, tokenaddress, timeframe, unixtime)
+                VALUES ({placeholders})
+            """, candleUpdates)
+            logger.info(f"TRADING SCHEDULER :: Inserting updates into temporary table completed for multi-column update")
+            
+            # Step 3: Single batch UPDATE using JOIN
+            logger.info(f"TRADING SCHEDULER :: Updating ohlcvdetails table started for multi-column update")
+            setClause = ', '.join([f"{col} = t.{col}" for col in columnNames])
+            cursor.execute(f"""
+                UPDATE ohlcvdetails 
+                SET {setClause}
+                FROM {tempTableName} t
+                WHERE ohlcvdetails.tokenaddress = t.tokenaddress 
+                  AND ohlcvdetails.timeframe = t.timeframe 
+                  AND ohlcvdetails.unixtime = t.unixtime
+            """)
+            logger.info(f"TRADING SCHEDULER :: Updating ohlcvdetails table completed for multi-column update")
+            
+        except Exception as e:
+            logger.inf0(f"TRADING SCHEDULER :: Error in optimized multi-column batch update: {e}")
+            raise
 
     def batchUpdateCandlesWithTempTable(self, cursor, candleUpdates: List[Tuple], columnName: str) -> None:
         """

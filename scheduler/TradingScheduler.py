@@ -50,7 +50,7 @@ class TradingScheduler:
             return True
             
         except Exception as e:
-            logger.error(f"TRADING SCHEDULER :: Critical error in trading updates: {e}")
+            logger.info(f"TRADING SCHEDULER :: Critical error in trading updates: {e}")
             return False
 
     def fetchCandlesAndPersist(self):
@@ -65,7 +65,7 @@ class TradingScheduler:
             
             
         except Exception as e:
-            logger.error(f"TRADING SCHEDULER :: Candle Fetching/Persistence Failed: {e}")
+            logger.info(f"TRADING SCHEDULER :: Candle Fetching/Persistence Failed: {e}")
       
 
     def fetchCandlesForTrackedTokens(self, trackedTokens: List[TrackedToken]):
@@ -115,7 +115,7 @@ class TradingScheduler:
                             logger.warning(f"TRADING SCHEDULER :: Failed to fetchfor {trackedToken.symbol} - {timeframeRecord.timeframe} : {candleResponse.error}")
                             
                     except Exception as e:
-                        logger.error(f"TRADING SCHEDULER :: Error fetching for {trackedToken.symbol} - {timeframeRecord.timeframe}: {e}")
+                        logger.info(f"TRADING SCHEDULER :: Error fetching for {trackedToken.symbol} - {timeframeRecord.timeframe}: {e}")
             logger.info(f"TRADING SCHEDULER :: Fetching completed for {trackedToken.symbol} ({len(trackedToken.timeframeRecords)} timeframes)")
 
 
@@ -135,7 +135,7 @@ class TradingScheduler:
             logger.info(f"TRADING SCHEDULER :: VWAP Calculation Completed")
             
         except Exception as e:
-            logger.error(f"TRADING SCHEDULER :: VWAP Calculation Failed: {e}")
+            logger.info(f"TRADING SCHEDULER :: VWAP Calculation Failed: {e}")
 
     def calculateAndPersistEMAIndicators(self):
         try:
@@ -153,7 +153,7 @@ class TradingScheduler:
             logger.info(f"TRADING SCHEDULER :: EMA Calculation Completed")
             
         except Exception as e:
-            logger.error(f"TRADING SCHEDULER :: EMA Calculation Failed: {e}")
+            logger.info(f"TRADING SCHEDULER :: EMA Calculation Failed: {e}")
 
     def calculateAndPersistAVWAPIndicators(self):
         
@@ -173,7 +173,7 @@ class TradingScheduler:
             logger.info(f"TRADING SCHEDULER :: AVWAP Calculation Completed")
             
         except Exception as e:
-            logger.error(f"TRADING SCHEDULER :: AVWAP Calculation Failed: {e}")
+            logger.info(f"TRADING SCHEDULER :: AVWAP Calculation Failed: {e}")
     
     def calculateAndPersistRSIIndicators(self):
         try:
@@ -192,7 +192,7 @@ class TradingScheduler:
             logger.info(f"TRADING SCHEDULER :: RSI Calculation Completed")
             
         except Exception as e:
-            logger.error(f"TRADING SCHEDULER :: RSI Calculation Failed: {e}")
+            logger.info(f"TRADING SCHEDULER :: RSI Calculation Failed: {e}")
     
     def calculateAndPersistAlerts(self):
         try:
@@ -212,7 +212,7 @@ class TradingScheduler:
             logger.info(f"TRADING SCHEDULER :: Alert Processing Completed")
             
         except Exception as e:
-            logger.error(f"TRADING SCHEDULER :: Alert Processing Failed: {e}")
+            logger.info(f"TRADING SCHEDULER :: Alert Processing Failed: {e}")
 
     def handleTradingDataFromAPI(self) -> Dict[str, Any]:
         success = self.handleTradingUpdatesFromJob()
