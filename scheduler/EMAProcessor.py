@@ -249,7 +249,7 @@ class EMAProcessor:
     
     
     def calcualteFirstEMAFromCandles(self, timeframeRecord, emaPeriod: int,
-                               trackedToken: 'TrackedToken', timeframe: str,
+                               tokenAddress: str, pairAddress: str, timeframe: str,
                                ema_available_time: int, pair_created_time: int, timeframe_in_seconds: int) -> bool:
         """
         SHARED METHOD: Calculate EMA from OHLCVDetails POJOs and update TimeframeRecord directly
