@@ -85,7 +85,6 @@ class RSIProcessor:
         """
         try:
             logger.info(f"TRADING SCHEDULER :: RSI calculation for {len(trackedTokens)} tracked tokens - started")
-            totalProcessed = 0
             
             for trackedToken in trackedTokens:
                 for timeframeRecord in trackedToken.timeframeRecords:
@@ -114,13 +113,10 @@ class RSIProcessor:
                     elif rsiCalculationType == RSICalculationType.AVAILABLE_UPDATE:
                         # Incremental update - use existing RSI state
                         self.performIncrementalRSIUpdate(
-                            timeframeRecord, trackedToken.tokenAddress,
-                            trackedToken.pairAddress
+                            timeframeRecord, trackedToken
                         )
-                    
-                    totalProcessed += 1
             
-            logger.info(f"TRADING SCHEDULER :: RSI calculation for {totalProcessed} timeframe records - completed")
+            logger.info(f"TRADING SCHEDULER :: RSI calculation for {len(trackedTokens)} tracked tokens - completed")
         
         except Exception as e:
             logger.info(f"TRADING SCHEDULER :: Error processing RSI calculations: {e}", exc_info=True)
@@ -173,21 +169,21 @@ class RSIProcessor:
             # Calculate first RSI using all candles
             timeframeInSeconds = CommonUtil.getTimeframeSeconds(timeframeRecord.timeframe)
             success = self.calculateFirstRSIFromCandles(
-                timeframeRecord, trackedToken,
+                timeframeRecord, tokenAddress, pairAddress,
                 timeframeRecord.timeframe, rsiAvailableAt,
                 timeframeRecord.rsiState.pairCreatedTime or 0, timeframeInSeconds
             )
             
             if success:
-                logger.info(f"TRADING SCHEDULER :: First RSI calculation for {tokenAddress} - {timeframeRecord.timeframe} - completed")
+                logger.info(f"TRADING SCHEDULER :: First RSI calculation for {symbol} - {timeframeRecord.timeframe} - completed")
             else:
-                logger.info(f"TRADING SCHEDULER :: First RSI calculation for {tokenAddress} - {timeframeRecord.timeframe} - failed")
+                logger.info(f"TRADING SCHEDULER :: First RSI calculation for {symbol} - {timeframeRecord.timeframe} - failed")
         
         except Exception as e:
-            logger.info(f"TRADING SCHEDULER :: Error in first RSI calculation: {e}", exc_info=True)
+            logger.info(f"TRADING SCHEDULER :: Error in first RSI calculation for {symbol} - {timeframeRecord.timeframe}: {e}", exc_info=True)
     
     def performIncrementalRSIUpdate(self, timeframeRecord: 'TimeframeRecord',
-                                    tokenAddress: str, pairAddress: str) -> None:
+                                    trackedToken: 'TrackedToken') -> None:
         """
         Perform incremental RSI update using existing state with modular flows
         
@@ -203,19 +199,24 @@ class RSIProcessor:
             pairAddress: Pair address
         """
         try:
+            tokenAddress = trackedToken.tokenAddress
+            pairAddress = trackedToken.pairAddress
+            symbol = trackedToken.symbol
             rsiState = timeframeRecord.rsiState
             candles = timeframeRecord.ohlcvDetails
             
             if not rsiState or not candles:
-                logger.warning(f"No RSI state or candles for update: {tokenAddress} {timeframeRecord.timeframe}")
+                logger.warning(f"TRADING SCHEDULER :: No RSI state or candles for update: {symbol} - {timeframeRecord.timeframe}")
                 return
             
             # Filter new candles after lastUpdatedUnix
             newCandles = [c for c in candles if c.unixTime > (rsiState.lastUpdatedUnix or 0)]
             
             if not newCandles:
-                logger.debug(f"No new candles for RSI update: {tokenAddress} {timeframeRecord.timeframe}")
+                logger.debug(f"TRADING SCHEDULER :: No new candles for RSI update: {symbol} - {timeframeRecord.timeframe}")
                 return
+
+           
             
             # Get previous close from RSI state (stored from last calculation)
             previousClose = rsiState.lastClosePrice
@@ -240,10 +241,9 @@ class RSIProcessor:
             rsiState.nextFetchTime = rsiState.lastUpdatedUnix + timeframeInSeconds
             rsiState.status = RSIStatus.AVAILABLE
             
-            logger.info(f"✓ Incremental RSI update completed for {tokenAddress} {timeframeRecord.timeframe}: processed {len(newCandles)} new candles")
-        
+            
         except Exception as e:
-            logger.info(f"✗ Error in incremental RSI update: {e}", exc_info=True)
+            logger.info(f"TRADING SCHEDULER :: Error in incremental RSI update for {symbol} - {timeframeRecord.timeframe}: {e}", exc_info=True)
     
     def calculateFirstRSIFromCandles(self, timeframeRecord: 'TimeframeRecord',
                                      tokenAddress: str, pairAddress: str,
@@ -327,7 +327,7 @@ class RSIProcessor:
             # Set RSI state in timeframe record
             timeframeRecord.rsiState = rsiState
             
-            logger.info(f"TRADING SCHEDULER :: RSI calculated for {symbol} - {timeframe}: RSI={rsiState.rsiValue:.2f}, StochRSI={rsiState.stochRSIValue}, K={rsiState.kValue}, D={rsiState.dValue}")
+            logger.info(f"TRADING SCHEDULER :: RSI calculated for {tokenAddress} - {timeframe}")
             return True
         
         except Exception as e:
