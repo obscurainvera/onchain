@@ -109,8 +109,7 @@ class RSIProcessor:
                     if rsiCalculationType == RSICalculationType.NOT_AVAILABLE_READY:
                         # First calculation - calculate from scratch
                         self.performFirstRSICalculation(
-                            timeframeRecord, trackedToken.tokenAddress,
-                            trackedToken.pairAddress, rsiState.rsiAvailableTime or 0
+                            timeframeRecord, trackedToken, rsiState.rsiAvailableTime or 0
                         )
                     elif rsiCalculationType == RSICalculationType.AVAILABLE_UPDATE:
                         # Incremental update - use existing RSI state
@@ -149,7 +148,7 @@ class RSIProcessor:
         return RSICalculationType.NOT_AVAILABLE_INSUFFICIENT
     
     def performFirstRSICalculation(self, timeframeRecord: 'TimeframeRecord',
-                                   tokenAddress: str, pairAddress: str,
+                                   trackedToken: 'TrackedToken',
                                    rsiAvailableAt: int) -> None:
         """
         Perform first-time RSI calculation from scratch
@@ -161,17 +160,20 @@ class RSIProcessor:
             rsiAvailableAt: When RSI becomes available
         """
         try:
+            tokenAddress = trackedToken.tokenAddress
+            pairAddress = trackedToken.pairAddress
+            symbol = trackedToken.symbol
             candles = timeframeRecord.ohlcvDetails
             if len(candles) < self.RSI_INTERVAL + 1:
-                logger.info(f"TRADING SCHEDULER :: Not enough candles for first RSI calculation: {tokenAddress} - {timeframeRecord.timeframe}")
+                logger.info(f"TRADING SCHEDULER :: Not enough candles for first RSI calculation: {symbol} - {timeframeRecord.timeframe}")
                 return
 
-            logger.info(f"TRADING SCHEDULER :: First RSI calculation for {tokenAddress} - {timeframeRecord.timeframe} - started")
+            logger.info(f"TRADING SCHEDULER :: First RSI calculation for {symbol} - {timeframeRecord.timeframe} - started")
             
             # Calculate first RSI using all candles
             timeframeInSeconds = CommonUtil.getTimeframeSeconds(timeframeRecord.timeframe)
             success = self.calculateFirstRSIFromCandles(
-                timeframeRecord, tokenAddress, pairAddress,
+                timeframeRecord, trackedToken,
                 timeframeRecord.timeframe, rsiAvailableAt,
                 timeframeRecord.rsiState.pairCreatedTime or 0, timeframeInSeconds
             )
@@ -325,11 +327,11 @@ class RSIProcessor:
             # Set RSI state in timeframe record
             timeframeRecord.rsiState = rsiState
             
-            logger.info(f"✓ RSI calculated for {tokenAddress} {timeframe}: RSI={rsiState.rsiValue:.2f}, StochRSI={rsiState.stochRSIValue}, K={rsiState.kValue}, D={rsiState.dValue}")
+            logger.info(f"TRADING SCHEDULER :: RSI calculated for {symbol} - {timeframe}: RSI={rsiState.rsiValue:.2f}, StochRSI={rsiState.stochRSIValue}, K={rsiState.kValue}, D={rsiState.dValue}")
             return True
         
         except Exception as e:
-            logger.info(f"✗ Error in RSI calculation from candles: {e}", exc_info=True)
+            logger.info(f"TRADING SCHEDULER :: Error in RSI calculation from candles: {e}", exc_info=True)
             return False
     
     def calculateRSIInMemory(self, timeframeRecord: 'TimeframeRecord',
