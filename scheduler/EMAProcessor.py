@@ -275,12 +275,9 @@ class EMAProcessor:
             bool: True if calculation successful, False otherwise
         """
         try:
-            tokenAddress = trackedToken.tokenAddress
-            pairAddress = trackedToken.pairAddress
-            symbol = trackedToken.symbol
             candles = timeframeRecord.ohlcvDetails
             if len(candles) < emaPeriod:
-                logger.info(f"TRADING SCHEDULER :: Not enough candles for EMA{emaPeriod} calculation: {symbol} - {timeframe}")
+                logger.info(f"TRADING SCHEDULER :: Not enough candles for EMA{emaPeriod} calculation: {tokenAddress} - {timeframe}")
                 return False
 
             currentEMA = None
@@ -312,7 +309,7 @@ class EMAProcessor:
                     candle.ema34Value = currentEMA
 
             if currentEMA is None:
-                logger.info(f"TRADING SCHEDULER :: No EMA values calculated for {symbol} - {timeframe} EMA{emaPeriod}")
+                logger.info(f"TRADING SCHEDULER :: No EMA values calculated for {tokenAddress} - {timeframe} EMA{emaPeriod}")
                 return False
 
             
