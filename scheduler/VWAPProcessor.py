@@ -79,9 +79,9 @@ class VWAPProcessor:
     def calculateVWAPForAllTrackedTokens(self, trackedTokens) -> None:           
         for trackedToken in trackedTokens:  
             for timeframeRecord in trackedToken.timeframeRecords:
-                logger.info(f"TRADING SCHEDULER :: Calculating VWAP {trackedToken.symbol} - {timeframeRecord.timeframe}")
-                self.calculateVWAPFromScheduler(timeframeRecord, trackedToken.tokenAddress, trackedToken.pairAddress)
-                logger.info(f"TRADING SCHEDULER :: Calculated VWAP for {trackedToken.symbol} {timeframeRecord.timeframe}")
+                logger.info(f"TRADING SCHEDULER :: VWAP calculation {trackedToken.symbol} - {timeframeRecord.timeframe} - started")
+                self.calculateVWAPFromScheduler(timeframeRecord, trackedToken.tokenAddress, trackedToken.pairAddress,trackedToken.symbol)
+                logger.info(f"TRADING SCHEDULER :: VWAP calculation for {trackedToken.symbol} - {timeframeRecord.timeframe} - completed")
                 
 
     def calculateVWAPFromScheduler(self, timeframeRecord, tokenAddress: str, pairAddress: str) -> None:

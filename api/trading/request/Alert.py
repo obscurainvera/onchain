@@ -119,16 +119,29 @@ class Alert:
             self.stochRSID = stochRSID
     
     def updateTrendAndStatus(self, trend: str, status: str, candleUnixTime: int):
-        """Update trend and status with timestamp"""
+        """Update trend and status"""
         self.trend = trend
         self.status = status
-        self.lastUpdatedUnix = candleUnixTime
 
     def updateTrendAndStatus12(self, trend12: str, status12: str, candleUnixTime: int):
-        """Update trend and status with timestamp"""
+        """Update trend and status"""
         self.trend12 = trend12
         self.status12 = status12
-        self.lastUpdatedUnix12 = candleUnixTime
+    
+    def updateLastUpdatedUnix(self, candleUnixTime: int) -> bool:
+        """
+        Update lastUpdatedUnix only if the new time is greater than existing time
+        
+        Args:
+            candleUnixTime: New candle unix timestamp
+            
+        Returns:
+            bool: True if timestamp was updated, False if no change or invalid time
+        """
+        if self.lastUpdatedUnix is None or candleUnixTime > self.lastUpdatedUnix:
+            self.lastUpdatedUnix = candleUnixTime
+            return True
+        return False
     
     def recordTouch(self, candleUnixTime: int):
         """Record a touch event"""

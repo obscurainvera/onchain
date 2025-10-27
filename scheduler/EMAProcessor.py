@@ -128,7 +128,7 @@ class EMAProcessor:
                         totalProcessed += 1
         
         except Exception as e:
-            logger.info(f"Error processing EMA calculations with POJOs: {e}")
+            logger.info(f"TRADING SCHEDULER :: Error processing EMA calculations: {e}")
 
     def findEMACalculationType(self, status: int, lastFetchedAt: int, emaAvailableAt: int) -> str:
         """

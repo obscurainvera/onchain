@@ -53,7 +53,7 @@ class AlertsProcessor:
         else:
             return TrendType.NEUTRAL.value
     
-    def processAlertNotifications(self, existingAlert: 'Alert', candle: 'OHLCVDetails', 
+    def processEMANotification(self, existingAlert: 'Alert', candle: 'OHLCVDetails', 
                                 previousTrend: Optional[str], currentTrend: Optional[str],
                                 previousTrend12: Optional[str], currentTrend12: Optional[str],
                                 trackedToken: 'TrackedToken', timeframeRecord: 'TimeframeRecord',
@@ -105,7 +105,7 @@ class AlertsProcessor:
                     logger.info(f"TRADING SCHEDULER :: EMA 12/21 touch recorded for {trackedToken.symbol} - {timeframeRecord.timeframe}")
                     self.sendBandTouchNotification(ChatCredentials.BAND_TOUCH_CHAT.value, trackedToken, timeframeRecord, candle, existingAlert, 'EMA12', 'EMA21')
     
-    def processAVWAPBreakoutAlert(self, existingAlert: 'Alert', candle: 'OHLCVDetails',
+    def processAVWAPNotification(self, existingAlert: 'Alert', candle: 'OHLCVDetails',
                                   trackedToken: 'TrackedToken', timeframeRecord: 'TimeframeRecord') -> None:
         """
         Process AVWAP breakout alert
@@ -562,19 +562,19 @@ class AlertsProcessor:
                 
                 
             
-                self.processAlertNotifications(
+                self.processEMANotification(
                     existingAlert, candle, previousTrend, currentTrend, 
                     previousTrend12, currentTrend12, trackedToken, timeframeRecord, 'ema23'
                 )
                 
                 
-                self.processAlertNotifications(
+                self.processEMANotification(
                     existingAlert, candle, previousTrend, currentTrend, 
                     previousTrend12, currentTrend12, trackedToken, timeframeRecord, 'ema12'
                 )
 
                
-                self.processAVWAPBreakoutAlert(existingAlert, candle, trackedToken, timeframeRecord)
+                self.processAVWAPNotification(existingAlert, candle, trackedToken, timeframeRecord)
                 
                
                 self.processStochRSIOversoldAlert(
@@ -615,6 +615,9 @@ class AlertsProcessor:
                 # Update trend and status
                 existingAlert.updateTrendAndStatus(currentTrend, currentStatus, candle.unixTime)
                 existingAlert.updateTrendAndStatus12(currentTrend12, currentStatus12, candle.unixTime)
+                
+                # Update lastUpdatedUnix only if there's a change
+                existingAlert.updateLastUpdatedUnix(candle.unixTime)
                 
                 # Update candle with trend and status
                 candle.trend = currentTrend
