@@ -114,21 +114,19 @@ class EMAProcessor:
                         if emaCalculationType == EMACalculationType.NOT_AVAILABLE_READY:
                             # First calculation - calculate from scratch
                             self.performFirstEMACalculationWithPOJOs(
-                                timeframeRecord, emaPeriod, trackedToken.tokenAddress, 
-                                trackedToken.pairAddress, emaState.emaAvailableTime or 0
+                                timeframeRecord, emaPeriod, trackedToken, emaState.emaAvailableTime or 0
                             )
                         elif emaCalculationType == EMACalculationType.AVAILABLE_UPDATE:
                             # Incremental update - use existing EMA value
                             self.performIncrementalEMAUpdateWithPOJOs(
-                                timeframeRecord, emaPeriod, trackedToken.tokenAddress, 
-                                trackedToken.pairAddress, emaState.emaValue or 0, 
+                                timeframeRecord, emaPeriod, trackedToken, emaState.emaValue or 0, 
                                 emaState.lastUpdatedUnix or 0
                             )
                         
                         totalProcessed += 1
         
         except Exception as e:
-            logger.info(f"TRADING SCHEDULER :: Error processing EMA calculations: {e}")
+            logger.info(f"TRADING SCHEDULER :: Error processing EMA calculations for {trackedToken.symbol} - {timeframeRecord.timeframe}: {e}")
 
     def findEMACalculationType(self, status: int, lastFetchedAt: int, emaAvailableAt: int) -> str:
         """
@@ -153,17 +151,23 @@ class EMAProcessor:
         return EMACalculationType.NOT_AVAILABLE_INSUFFICIENT
 
     def performFirstEMACalculationWithPOJOs(self, timeframeRecord, emaPeriod: int, 
-                                           tokenAddress: str, pairAddress: str, emaAvailableAt: int) -> None:
+                                           trackedToken: 'TrackedToken', emaAvailableAt: int) -> None:
         """
         Perform first-time EMA calculation using POJOs and update them directly
         """
         try:
+            tokenAddress = trackedToken.tokenAddress
+            pairAddress = trackedToken.pairAddress
+            symbol = trackedToken.symbol
+
             # Filter candles to only include those from emaAvailableAt onwards
             filteredCandles = [c for c in timeframeRecord.ohlcvDetails if c.unixTime >= emaAvailableAt]
             
             if len(filteredCandles) < emaPeriod:
-                logger.warning(f"Not enough candles for first EMA{emaPeriod} calculation: {tokenAddress} {timeframeRecord.timeframe}")
+                logger.warning(f"TRADING SCHEDULER :: Not enough candles for first EMA{emaPeriod} calculation: {symbol} - {timeframeRecord.timeframe}")
                 return
+
+            logger.info(f"TRADING SCHEDULER :: First EMA{emaPeriod} calculation for {symbol} - {timeframeRecord.timeframe} - started")
             
             # Use the shared EMA calculation method with POJOs
             timeframeInSeconds = CommonUtil.getTimeframeSeconds(timeframeRecord.timeframe)
@@ -173,29 +177,32 @@ class EMAProcessor:
             )
             
             if success:
-                logger.info(f"First EMA{emaPeriod} calculation completed for {tokenAddress} {timeframeRecord.timeframe}")
+                logger.info(f"TRADING SCHEDULER :: First EMA{emaPeriod} calculation for {symbol} - {timeframeRecord.timeframe} - completed")
             else:
-                logger.warning(f"First EMA{emaPeriod} calculation failed for {tokenAddress} {timeframeRecord.timeframe}")
+                logger.warning(f"TRADING SCHEDULER :: First EMA{emaPeriod} calculation for {symbol} - {timeframeRecord.timeframe} - failed")
             
         except Exception as e:
-            logger.info(f"Error in first EMA calculation with POJOs: {e}")
+            logger.info(f"TRADING SCHEDULER :: Error in first EMA calculation : {e}")
     
     def performIncrementalEMAUpdateWithPOJOs(self, timeframeRecord, emaPeriod: int, 
-                                            tokenAddress: str, pairAddress: str, 
+                                            trackedToken: 'TrackedToken', 
                                             currentEMA: float, lastUpdatedAt: int) -> None:
         """
         Perform incremental EMA update using POJOs and update them directly
         """
         try:
             # Filter candles to only include new ones after lastUpdatedAt
+            symbol = trackedToken.symbol
             newCandles = [c for c in timeframeRecord.ohlcvDetails if c.unixTime > lastUpdatedAt]
             
             if not newCandles:
-                logger.debug(f"No new candles for incremental EMA update: {tokenAddress} {timeframeRecord.timeframe}")
+                logger.info(f"TRADING SCHEDULER :: No new candles for incremental EMA update: {symbol} - {timeframeRecord.timeframe}")
                 return
             
             currentEMAValue = currentEMA
             latestUNIX = lastUpdatedAt
+
+            logger.info(f"TRADING SCHEDULER :: Incremental EMA{emaPeriod} update for {symbol} - {timeframeRecord.timeframe} - started")
             
             for candle in newCandles:
                 currentEMAValue = self.calculateEMAValue(currentEMAValue, candle.closePrice, emaPeriod)
@@ -217,10 +224,10 @@ class EMAProcessor:
                 emaState.nextFetchTime = latestUNIX + CommonUtil.getTimeframeSeconds(timeframeRecord.timeframe)
                 emaState.status = EMAStatus.AVAILABLE
             
-            logger.info(f"Incremental EMA{emaPeriod} update completed for {tokenAddress} {timeframeRecord.timeframe}: {currentEMAValue}")
+            logger.info(f"TRADING SCHEDULER :: Incremental EMA{emaPeriod} update for {symbol} - {timeframeRecord.timeframe} - completed")
             
         except Exception as e:
-            logger.info(f"Error in incremental EMA update with POJOs: {e}")
+            logger.info(f"TRADING SCHEDULER :: Error in incremental EMA update for {symbol} - {timeframeRecord.timeframe} - {e}")
 
 
     def calculateEMAValue(self, previousEMA: float, currentPrice, period: int) -> float:
@@ -242,7 +249,7 @@ class EMAProcessor:
     
     
     def calcualteFirstEMAFromCandles(self, timeframeRecord, emaPeriod: int,
-                               token_address: str, pair_address: str, timeframe: str,
+                               trackedToken: 'TrackedToken', timeframe: str,
                                ema_available_time: int, pair_created_time: int, timeframe_in_seconds: int) -> bool:
         """
         SHARED METHOD: Calculate EMA from OHLCVDetails POJOs and update TimeframeRecord directly
@@ -268,9 +275,12 @@ class EMAProcessor:
             bool: True if calculation successful, False otherwise
         """
         try:
+            tokenAddress = trackedToken.tokenAddress
+            pairAddress = trackedToken.pairAddress
+            symbol = trackedToken.symbol
             candles = timeframeRecord.ohlcvDetails
             if len(candles) < emaPeriod:
-                logger.warning(f"Not enough candles for EMA{emaPeriod} calculation: {token_address} {timeframe}")
+                logger.info(f"TRADING SCHEDULER :: Not enough candles for EMA{emaPeriod} calculation: {symbol} - {timeframe}")
                 return False
 
             currentEMA = None
@@ -302,13 +312,13 @@ class EMAProcessor:
                     candle.ema34Value = currentEMA
 
             if currentEMA is None:
-                logger.warning(f"No EMA values calculated for {token_address} {timeframe} EMA{emaPeriod}")
+                logger.info(f"TRADING SCHEDULER :: No EMA values calculated for {symbol} - {timeframe} EMA{emaPeriod}")
                 return False
 
             
             emaState = EMAState(
-                tokenAddress=token_address,
-                pairAddress=pair_address,
+                tokenAddress=tokenAddress,
+                pairAddress=pairAddress,
                 timeframe=timeframe,
                 emaKey=str(emaPeriod),
                 emaValue=currentEMA,
@@ -327,11 +337,10 @@ class EMAProcessor:
             elif emaPeriod == 34:
                 timeframeRecord.ema34State = emaState
 
-            logger.info(f"EMA{emaPeriod} calculated for {token_address} {timeframe}: final value {currentEMA}")
             return True
 
         except Exception as e:
-            logger.info(f"Error in shared EMA calculation: {e}")
+            logger.info(f"TRADING SCHEDULER :: Error in shared EMA calculation: {e}")
             return False
 
 

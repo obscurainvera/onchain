@@ -84,10 +84,10 @@ class VWAPProcessor:
                 logger.info(f"TRADING SCHEDULER :: VWAP calculation for {trackedToken.symbol} - {timeframeRecord.timeframe} - completed")
                 
 
-    def calculateVWAPFromScheduler(self, timeframeRecord, tokenAddress: str, pairAddress: str) -> None:
+    def calculateVWAPFromScheduler(self, timeframeRecord, tokenAddress: str, pairAddress: str, symbol: str) -> None:
         try:
             if not timeframeRecord.ohlcvDetails:
-                logger.warning(f"TRADING SCHEDULER :: No candles available for VWAP {tokenAddress} - {timeframeRecord.timeframe}")
+                logger.warning(f"TRADING SCHEDULER :: No candles available for VWAP {symbol} - {timeframeRecord.timeframe}")
                 return
             
             # Sort candles by unixTime to ensure chronological processing
@@ -119,7 +119,7 @@ class VWAPProcessor:
                 if sessionEndUnix is not None:
                     if CommonUtil.isNewDay(candleUnix, sessionEndUnix):
                         # Day boundary crossed - reset VWAP session for new day
-                        logger.info(f"TRADING SCHEDULER :: Day boundary detected for {tokenAddress} - {timeframeRecord.timeframe}: "
+                        logger.info(f"TRADING SCHEDULER :: Day boundary detected for {symbol} - {timeframeRecord.timeframe}: "
                                   f"candle day {candleDay} > session day {sessionEndUnix // 86400}")
                         
                         # Reset for new day
@@ -163,7 +163,7 @@ class VWAPProcessor:
                     nextCandleFetch=lastCandleUnix + timeframeSeconds
                 )
 
-                logger.info(f"TRADING SCHEDULER :: Calculated VWAP for {tokenAddress} - {timeframeRecord.timeframe}: {timeframeRecord.vwapSession.currentVWAP:.8f}")
+                
             
         except Exception as e:
             logger.info(f"TRADING SCHEDULER :: Error calculating VWAP for {tokenAddress} - {timeframeRecord.timeframe}: {e}")

@@ -22,7 +22,7 @@ from api.trading.request import EMAState
 from api.trading.request import AVWAPState
 from api.trading.request import TrackedToken, TimeframeRecord, OHLCVDetails, Alert
 # Add EMA available times for processing
-from api.trading.request import EMAState       
+from api.trading.request import EMAState        
 from api.trading.request import TrackedToken, TimeframeRecord, OHLCVDetails, RSIState
 
 
@@ -528,6 +528,8 @@ class TradingHandler(BaseDBHandler):
                         tt.tokenaddress,
                         tt.pairaddress,
                         tm.id as timeframeid,
+                        tt.symbol,
+                        tt.name,
                         tm.timeframe,
                         tm.lastfetchedat,
                         vs.sessionstartunix,
@@ -670,7 +672,7 @@ class TradingHandler(BaseDBHandler):
                 cursor.execute(text("""
                     WITH ema_data AS (
                         SELECT 
-                            es.tokenaddress,
+                            es.tokenaddress, -- add name and symbol to the query
                             es.pairaddress,
                             es.timeframe,
                             es.emakey,
@@ -684,7 +686,9 @@ class TradingHandler(BaseDBHandler):
                                 WHEN es.status = 2 THEN es.lastupdatedunix  -- AVAILABLE: get candles after last updated
                                 WHEN es.status = 1 AND tmf.lastfetchedat >= es.emaavailabletime THEN 0  -- NOT_AVAILABLE_READY: get ALL candles (for initial SMA calculation)
                                 ELSE 0  -- NOT_AVAILABLE_INSUFFICIENT: no candles needed
-                            END as candle_from_time
+                            END as candle_from_time,
+                            tt.symbol,
+                            tt.name
                         FROM emastates es
                         INNER JOIN trackedtokens tt ON es.tokenaddress = tt.tokenaddress AND es.pairaddress = tt.pairaddress
                         INNER JOIN timeframemetadata tmf ON es.tokenaddress = tmf.tokenaddress AND es.timeframe = tmf.timeframe
@@ -717,7 +721,9 @@ class TradingHandler(BaseDBHandler):
                         ed.emaavailabletime,
                         ed.lastfetchedat,
                         cd.unixtime as candle_unixtime,
-                        cd.closeprice as candle_closeprice
+                        cd.closeprice as candle_closeprice,
+                        ed.symbol,
+                        ed.name
                     FROM ema_data ed
                     LEFT JOIN candle_data cd ON ed.tokenaddress = cd.tokenaddress 
                         AND ed.timeframe = cd.timeframe 
@@ -746,8 +752,8 @@ class TradingHandler(BaseDBHandler):
                         trackedTokens[tokenAddress] = TrackedToken(
                             trackedTokenId=0,  # Will be set from database if needed
                             tokenAddress=tokenAddress,
-                            symbol='',  # Not needed for EMA processing
-                            name='',    # Not needed for EMA processing
+                            symbol=row['symbol'],
+                            name=row['name'],
                             pairAddress=pairAddress,
                             addedBy='scheduler'
                         )
@@ -879,7 +885,7 @@ class TradingHandler(BaseDBHandler):
                     isActive=True
                 )
                 createdRecords.append(timeframeRecord)
-        
+            
             return createdRecords
                 
         except Exception as e:
@@ -1173,7 +1179,7 @@ class TradingHandler(BaseDBHandler):
                 
                 if avwapStateData:
                     self.batchInsertAVWAPStates(cursor, avwapStateData)
-                
+            
                 if rsiStateData:
                     self.batchInsertRSIStates(cursor, rsiStateData)
             
@@ -1359,7 +1365,7 @@ class TradingHandler(BaseDBHandler):
                 
                 if avwapStateData:
                     self.batchInsertAVWAPStates(cursor, avwapStateData)
-                
+            
                 if rsiStateData:
                     self.batchInsertRSIStates(cursor, rsiStateData)
             
@@ -1588,6 +1594,8 @@ class TradingHandler(BaseDBHandler):
                             avs.nextfetchtime,
                             tmf.id as timeframeid,
                             tmf.lastfetchedat,
+                            tt.symbol,
+                            tt.name,
                             CASE 
                                 WHEN avs.lastupdatedunix IS NOT NULL THEN avs.lastupdatedunix  -- Get candles after last updated
                                 ELSE 0  -- Get all candles if no previous update
@@ -1638,7 +1646,9 @@ class TradingHandler(BaseDBHandler):
                         cd.volume as candle_volume,
                         cd.trades as candle_trades,
                         cd.iscomplete as candle_iscomplete,
-                        cd.datasource as candle_datasource
+                        cd.datasource as candle_datasource,
+                        ad.symbol,
+                        ad.name
                     FROM avwap_data ad
                     LEFT JOIN candle_data cd ON ad.tokenaddress = cd.tokenaddress 
                         AND ad.timeframe = cd.timeframe
@@ -1661,8 +1671,8 @@ class TradingHandler(BaseDBHandler):
                         trackedTokens[tokenAddress] = TrackedToken(
                             trackedTokenId=0,  # Will be set from database if needed
                             tokenAddress=tokenAddress,
-                            symbol='',  # Not needed for AVWAP processing
-                            name='',    # Not needed for AVWAP processing
+                            symbol=row['symbol'],  
+                            name=row['name'],   
                             pairAddress=pairAddress,
                             addedBy='scheduler'
                         )
@@ -1802,7 +1812,7 @@ class TradingHandler(BaseDBHandler):
         except Exception as e:
             logger.info(f"TRADING SCHEDULER :: Error in batch persist AVWAP data: {e}")
             return 0
-    
+
     def getAllRSIDataForScheduler(self) -> List['TrackedToken']:
         """
         Get all RSI data with corresponding candles for scheduler processing
@@ -1845,7 +1855,9 @@ class TradingHandler(BaseDBHandler):
                                 WHEN rs.status = 2 THEN rs.lastupdatedunix
                                 WHEN rs.status = 1 AND tmf.lastfetchedat >= rs.rsiavailabletime THEN 0
                                 ELSE -1
-                            END as candle_from_time
+                            END as candle_from_time,
+                            tt.symbol,
+                            tt.name
                         FROM rsistates rs
                         INNER JOIN trackedtokens tt ON rs.tokenaddress = tt.tokenaddress AND rs.pairaddress = tt.pairaddress
                         INNER JOIN timeframemetadata tmf ON rs.tokenaddress = tmf.tokenaddress AND rs.timeframe = tmf.timeframe
@@ -1897,7 +1909,9 @@ class TradingHandler(BaseDBHandler):
                         cd.closeprice as candle_closeprice,
                         cd.highprice as candle_highprice,
                         cd.lowprice as candle_lowprice,
-                        cd.volume as candle_volume
+                        cd.volume as candle_volume,
+                        rd.symbol,
+                        rd.name
                     FROM rsi_data rd
                     LEFT JOIN candle_data cd ON rd.tokenaddress = cd.tokenaddress 
                         AND rd.timeframe = cd.timeframe
@@ -1924,8 +1938,8 @@ class TradingHandler(BaseDBHandler):
                         trackedTokens[tokenAddress] = TrackedToken(
                             trackedTokenId=0,
                             tokenAddress=tokenAddress,
-                            symbol='',
-                            name='',
+                            symbol=row['symbol'],
+                            name=row['name'],
                             pairAddress=pairAddress,
                             addedBy='scheduler'
                         )

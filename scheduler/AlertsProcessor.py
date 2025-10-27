@@ -518,7 +518,6 @@ class AlertsProcessor:
                     timeframeRecord.alert = alert
             
             logger.info(f"TRADING SCHEDULER :: Processing alerts for token {trackedToken.symbol} completed")
-            
         except Exception as e:
             logger.info(f"TRADING SCHEDULER :: Error processing alerts for token {trackedToken.symbol}: {e}")
     
@@ -550,7 +549,7 @@ class AlertsProcessor:
             
             # Process candles chronologically
             for candle in timeframeRecord.ohlcvDetails:
-                if not self.areIndicatorsReady(candle, timeframeRecord):
+                if not self.areIndicatorsReady(candle, timeframeRecord): 
                     logger.info(f"TRADING SCHEDULER :: Indicators not ready for {trackedToken.symbol} - {timeframeRecord.timeframe} - {candle.unixTime}")
                     continue
                 

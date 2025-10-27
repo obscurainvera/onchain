@@ -111,29 +111,29 @@ class AVWAPProcessor:
     def calculateAVWAPForAllTrackedTokens(self, trackedTokens: List['TrackedToken']) -> None:
         
         try:
-            totalProcessed = 0
-            
             for trackedToken in trackedTokens:
                 for timeframeRecord in trackedToken.timeframeRecords:
                     if timeframeRecord.avwapState and timeframeRecord.ohlcvDetails:
                         # Calculate AVWAP incrementally using existing state
+                        logger.info(f"TRADING SCHEDULER :: AVWAP calculation for {trackedToken.symbol} - {timeframeRecord.timeframe} - started")
                         self.calculateAVWAPIncrementalWithPOJOs(
-                            timeframeRecord, trackedToken.tokenAddress, trackedToken.pairAddress
+                            timeframeRecord, trackedToken
                         )
-                        totalProcessed += 1
-            
-
+                        logger.info(f"TRADING SCHEDULER :: AVWAP calculation for {trackedToken.symbol} - {timeframeRecord.timeframe} - completed")
         
         except Exception as e:
-            logger.info(f"TRADING SCHEDULER :: Error processing AVWAP calculations - {e}")
+            logger.info(f"TRADING SCHEDULER :: Error processing AVWAP calculations for {trackedToken.symbol} - {timeframeRecord.timeframe}: {e}")
 
-    def calculateAVWAPIncrementalWithPOJOs(self, timeframeRecord, tokenAddress: str, pairAddress: str) -> None:
+    def calculateAVWAPIncrementalWithPOJOs(self, timeframeRecord, trackedToken: 'TrackedToken') -> None:
         try:
+            tokenAddress = trackedToken.tokenAddress
+            pairAddress = trackedToken.pairAddress
+            symbol = trackedToken.symbol
             avwapState = timeframeRecord.avwapState
             candles = timeframeRecord.ohlcvDetails
             
             if not avwapState or not candles:
-                logger.warning(f"TRADING SCHEDULER :: No AVWAP state or candles available for {tokenAddress} - {timeframeRecord.timeframe}")
+                logger.info(f"TRADING SCHEDULER :: No AVWAP state or candles available for {symbol} - {timeframeRecord.timeframe}")
                 return
             
             # Sort candles by unixTime to ensure chronological processing
@@ -148,10 +148,9 @@ class AVWAPProcessor:
             newCandles = [c for c in candles if c.unixTime > latestUnix]
             
             if not newCandles:
-                logger.debug(f"TRADING SCHEDULER :: No new candles for AVWAP update: {tokenAddress} - {timeframeRecord.timeframe}")
+                logger.info(f"TRADING SCHEDULER :: No new candles for AVWAP update: {symbol} - {timeframeRecord.timeframe}")
                 return
             
-            logger.info(f"TRADING SCHEDULER :: VWAP calculation started for {len(newCandles)} new candles : {tokenAddress} - {timeframeRecord.timeframe}")
             
             # Process new candles incrementally
             for candle in newCandles:
@@ -175,9 +174,7 @@ class AVWAPProcessor:
             avwapState.cumulativeVolume = currentCumulativeVolume
             avwapState.lastUpdatedUnix = latestUnix
             avwapState.nextFetchTime = latestUnix + CommonUtil.getTimeframeSeconds(timeframeRecord.timeframe)
-            
-            logger.info(f"TRADING SCHEDULER :: VWAP calculation completed for {tokenAddress} - {timeframeRecord.timeframe}: {avwapState.avwap:.8f} (processed {len(newCandles)} new candles)")
-            
+
         except Exception as e:
-            logger.info(f"TRADING SCHEDULER :: Error calculating AVWAP incrementally for {tokenAddress} - {timeframeRecord.timeframe}: {e}")
+            logger.info(f"TRADING SCHEDULER :: Error calculating AVWAP incrementally for {symbol} - {timeframeRecord.timeframe}: {e}")
     
