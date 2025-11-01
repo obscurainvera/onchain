@@ -441,6 +441,127 @@ class TradingHandler(BaseDBHandler):
                 'tokenInfo': None
             }
 
+    def deleteToken(self, tokenAddress: str, deletedBy: str = None) -> Dict[str, Any]:
+        """
+        Permanently delete token and all related data from all tables
+        
+        Args:
+            tokenAddress: Token contract address
+            deletedBy: User who deleted the token
+            
+        Returns:
+            Dict containing success status, token info, and records deleted count
+        """
+        try:
+            with self.conn_manager.transaction() as cursor:
+                # Step 1: Get token info before deletion
+                cursor.execute(
+                    text("""
+                        SELECT trackedtokenid, symbol, name, tokenaddress
+                        FROM trackedtokens 
+                        WHERE tokenaddress = %s
+                    """),
+                    (tokenAddress,)
+                )
+                result = cursor.fetchone()
+                
+                if not result:
+                    logger.warning(f"Token {tokenAddress} not found")
+                    return {
+                        'success': False,
+                        'error': 'Token not found',
+                        'tokenInfo': None,
+                        'recordsDeleted': {}
+                    }
+                
+                tokenInfo = {
+                    'trackedtokenid': result['trackedtokenid'],
+                    'symbol': result['symbol'],
+                    'name': result['name'],
+                    'tokenaddress': result['tokenaddress']
+                }
+                
+                # Step 2: Delete all related data in a single optimized query using CTEs
+                cursor.execute(
+                    text("""
+                        WITH deleted_alerts AS (
+                            DELETE FROM alerts WHERE tokenaddress = %s RETURNING 1
+                        ),
+                        deleted_rsistates AS (
+                            DELETE FROM rsistates WHERE tokenaddress = %s RETURNING 1
+                        ),
+                        deleted_avwapstates AS (
+                            DELETE FROM avwapstates WHERE tokenaddress = %s RETURNING 1
+                        ),
+                        deleted_vwapsessions AS (
+                            DELETE FROM vwapsessions WHERE tokenaddress = %s RETURNING 1
+                        ),
+                        deleted_emastates AS (
+                            DELETE FROM emastates WHERE tokenaddress = %s RETURNING 1
+                        ),
+                        deleted_ohlcvdetails AS (
+                            DELETE FROM ohlcvdetails WHERE tokenaddress = %s RETURNING 1
+                        ),
+                        deleted_timeframemetadata AS (
+                            DELETE FROM timeframemetadata WHERE tokenaddress = %s RETURNING 1
+                        ),
+                        deleted_trackedtokens AS (
+                            DELETE FROM trackedtokens WHERE tokenaddress = %s RETURNING 1
+                        )
+                        SELECT 
+                            (SELECT COUNT(*) FROM deleted_alerts) as alerts_deleted,
+                            (SELECT COUNT(*) FROM deleted_rsistates) as rsistates_deleted,
+                            (SELECT COUNT(*) FROM deleted_avwapstates) as avwapstates_deleted,
+                            (SELECT COUNT(*) FROM deleted_vwapsessions) as vwapsessions_deleted,
+                            (SELECT COUNT(*) FROM deleted_emastates) as emastates_deleted,
+                            (SELECT COUNT(*) FROM deleted_ohlcvdetails) as ohlcvdetails_deleted,
+                            (SELECT COUNT(*) FROM deleted_timeframemetadata) as timeframemetadata_deleted,
+                            (SELECT COUNT(*) FROM deleted_trackedtokens) as trackedtokens_deleted
+                    """),
+                    (tokenAddress, tokenAddress, tokenAddress, tokenAddress, 
+                     tokenAddress, tokenAddress, tokenAddress, tokenAddress)
+                )
+                
+                deletionResult = cursor.fetchone()
+                recordsDeleted = {
+                    'alerts': deletionResult['alerts_deleted'],
+                    'rsiStates': deletionResult['rsistates_deleted'],
+                    'avwapStates': deletionResult['avwapstates_deleted'],
+                    'vwapSessions': deletionResult['vwapsessions_deleted'],
+                    'emaStates': deletionResult['emastates_deleted'],
+                    'ohlcvDetails': deletionResult['ohlcvdetails_deleted'],
+                    'timeframeMetadata': deletionResult['timeframemetadata_deleted'],
+                    'trackedTokens': deletionResult['trackedtokens_deleted']
+                }
+                
+                logger.info(
+                    f"Deleted token {tokenInfo['symbol']} ({tokenAddress}) - "
+                    f"Records: alerts={recordsDeleted['alerts']}, "
+                    f"rsiStates={recordsDeleted['rsiStates']}, "
+                    f"avwapStates={recordsDeleted['avwapStates']}, "
+                    f"vwapSessions={recordsDeleted['vwapSessions']}, "
+                    f"emaStates={recordsDeleted['emaStates']}, "
+                    f"ohlcvDetails={recordsDeleted['ohlcvDetails']}, "
+                    f"timeframeMetadata={recordsDeleted['timeframeMetadata']}, "
+                    f"trackedTokens={recordsDeleted['trackedTokens']} - "
+                    f"Deleted by: {deletedBy}"
+                )
+                
+                return {
+                    'success': True,
+                    'tokenInfo': tokenInfo,
+                    'recordsDeleted': recordsDeleted
+                }
+                
+        except Exception as e:
+            logger.info(f"Error deleting token {tokenAddress}: {e}")
+            return {
+                'success': False,
+                'error': str(e),
+                'tokenInfo': None,
+                'recordsDeleted': {}
+            }
+
     def getActiveTokens(self) -> List[Dict]:
         """Get all active tracked tokens with their metadata"""
         try:

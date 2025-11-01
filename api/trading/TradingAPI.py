@@ -259,6 +259,85 @@ def enableToken():
         }), 500
 
 
+@trading_bp.route('/api/tokens/delete', methods=['POST', 'OPTIONS'])
+def deleteToken():
+    """
+    Delete Token API - POST /api/tokens/delete
+    
+    REQUEST BODY:
+    {
+        "tokenAddress": "So11111111111111111111111111111111111111112",
+        "deletedBy": "admin@example.com"
+    }
+    """
+    if request.method == 'OPTIONS':
+        return jsonify({}), 200
+    
+    try:
+        logger.info("TRADING API :: Delete token request started")
+        
+        data = request.get_json()
+        if not data:
+            logger.warning("TRADING API :: No JSON data provided for delete token")
+            return jsonify({
+                'success': False,
+                'error': 'No JSON data provided'
+            }), 400
+        
+        # Extract and validate required fields
+        tokenAddress = data.get('tokenAddress', '').strip()
+        deletedBy = data.get('deletedBy', 'api_user')
+        
+        if not tokenAddress:
+            logger.warning("TRADING API :: Missing tokenAddress in delete request")
+            return jsonify({
+                'success': False,
+                'error': 'Missing required field: tokenAddress'
+            }), 400
+        
+        # Delete the token and all related data
+        logger.info(f"TRADING API :: Deleting token: {tokenAddress}")
+        
+        result = trading_handler.deleteToken(
+            tokenAddress=tokenAddress,
+            deletedBy=deletedBy
+        )
+        
+        if not result['success']:
+            if 'not found' in result['error'].lower():
+                logger.info(f"TRADING API :: Token not found: {tokenAddress}")
+                return jsonify({
+                    'success': False,
+                    'error': f'Token {tokenAddress} not found'
+                }), 404
+            else:
+                logger.info(f"TRADING API :: Failed to delete token {tokenAddress}: {result['error']}")
+                return jsonify({
+                    'success': False,
+                    'error': f'Failed to delete token: {result["error"]}'
+                }), 500
+        
+        tokenInfo = result['tokenInfo']
+        logger.info(f"TRADING API :: Successfully deleted token {tokenInfo['symbol']} ({tokenAddress})")
+        
+        return jsonify({
+            'success': True,
+            'tokenAddress': tokenAddress,
+            'symbol': tokenInfo['symbol'],
+            'name': tokenInfo['name'],
+            'deletedBy': deletedBy,
+            'recordsDeleted': result['recordsDeleted'],
+            'message': f'Token {tokenInfo["symbol"]} and all related data deleted successfully'
+        }), 200
+        
+    except Exception as e:
+        logger.info(f"TRADING API :: Error in deleteToken API: {str(e)}", exc_info=True)
+        return jsonify({
+            'success': False,
+            'error': f'Internal server error: {str(e)}'
+        }), 500
+
+
 @trading_bp.route('/api/tokens/list', methods=['GET', 'OPTIONS'])
 def listTokens():
     """
