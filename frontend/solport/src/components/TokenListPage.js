@@ -21,11 +21,14 @@ const TokenListPage = () => {
   const [itemsPerPage] = useState(20);
   const [showDisableModal, setShowDisableModal] = useState(false);
   const [showEnableModal, setShowEnableModal] = useState(false);
+  const [showDeleteModal, setShowDeleteModal] = useState(false);
   const [selectedToken, setSelectedToken] = useState(null);
   const [disableReason, setDisableReason] = useState('');
   const [enableReason, setEnableReason] = useState('');
+  const [deleteConfirmation, setDeleteConfirmation] = useState('');
   const [disableLoading, setDisableLoading] = useState(false);
   const [enableLoading, setEnableLoading] = useState(false);
+  const [deleteLoading, setDeleteLoading] = useState(false);
 
   // Fetch tokens from API
   const fetchTokens = async (page = 1, status = 'active') => {
@@ -176,6 +179,59 @@ const TokenListPage = () => {
       setError(err.response?.data?.error || 'Failed to enable token. Please try again.');
     } finally {
       setEnableLoading(false);
+    }
+  };
+
+  // Handle token delete
+  const handleDeleteToken = (token) => {
+    setSelectedToken(token);
+    setDeleteConfirmation('');
+    setShowDeleteModal(true);
+  };
+
+  // Confirm token delete
+  const confirmDeleteToken = async () => {
+    if (!selectedToken || deleteConfirmation !== selectedToken.symbol) {
+      setError(`Please type "${selectedToken?.symbol}" to confirm deletion`);
+      return;
+    }
+
+    try {
+      setDeleteLoading(true);
+      setError(null);
+
+      const response = await axios.post(`${API_BASE_URL}/api/tokens/delete`, {
+        tokenAddress: selectedToken.tokenAddress,
+        deletedBy: 'admin@example.com' // You might want to get this from user context
+      });
+
+      if (response.data && response.data.success) {
+        const records = response.data.recordsDeleted;
+        const breakdown = [
+          `Alerts: ${records.alerts}`,
+          `RSI States: ${records.rsiStates}`,
+          `AVWAP States: ${records.avwapStates}`,
+          `VWAP Sessions: ${records.vwapSessions}`,
+          `EMA States: ${records.emaStates}`,
+          `OHLCV Details: ${records.ohlcvDetails}`,
+          `Timeframes: ${records.timeframeMetadata}`,
+          `Token: ${records.trackedTokens}`
+        ].join(', ');
+        
+        setSuccess(`Token ${selectedToken.symbol} permanently deleted! Records removed: ${breakdown}`);
+        setShowDeleteModal(false);
+        setSelectedToken(null);
+        setDeleteConfirmation('');
+        // Refresh the token list
+        fetchTokens(currentPage, statusFilter);
+      } else {
+        setError(response.data.error || 'Failed to delete token');
+      }
+    } catch (err) {
+      if (isDev) console.error('Error deleting token:', err);
+      setError(err.response?.data?.error || 'Failed to delete token. Please try again.');
+    } finally {
+      setDeleteLoading(false);
     }
   };
 
@@ -361,36 +417,57 @@ const TokenListPage = () => {
                         </td>
                         <td>
                           <div className="action-buttons">
-                            <Button
-                              variant="outline-info"
-                              size="sm"
-                              onClick={() => window.open(getDexscreenerUrl(token.pairAddress), '_blank')}
-                              className="action-btn"
-                              title="View on DexScreener"
-                            >
-                              <i className="fas fa-external-link-alt"></i>
-                            </Button>
+                            <div className="action-btn-wrapper">
+                              <span className="action-btn-label">D</span>
+                              <Button
+                                variant="outline-info"
+                                size="sm"
+                                onClick={() => window.open(getDexscreenerUrl(token.pairAddress), '_blank')}
+                                className="action-btn action-btn-dexscreener"
+                                title="View on DexScreener"
+                              >
+                                <i className="fas fa-external-link-alt"></i>
+                              </Button>
+                            </div>
                             {token.status === 'active' ? (
+                              <div className="action-btn-wrapper">
+                                <span className="action-btn-label">Di</span>
+                                <Button
+                                  variant="outline-warning"
+                                  size="sm"
+                                  onClick={() => handleDisableToken(token)}
+                                  className="action-btn action-btn-disable"
+                                  title="Disable Token"
+                                >
+                                  <i className="fas fa-ban"></i>
+                                </Button>
+                              </div>
+                            ) : (
+                              <div className="action-btn-wrapper">
+                                <span className="action-btn-label">E</span>
+                                <Button
+                                  variant="outline-success"
+                                  size="sm"
+                                  onClick={() => handleEnableToken(token)}
+                                  className="action-btn action-btn-enable"
+                                  title="Enable Token"
+                                >
+                                  <i className="fas fa-check"></i>
+                                </Button>
+                              </div>
+                            )}
+                            <div className="action-btn-wrapper">
+                              <span className="action-btn-label">De</span>
                               <Button
                                 variant="outline-danger"
                                 size="sm"
-                                onClick={() => handleDisableToken(token)}
-                                className="action-btn"
-                                title="Disable Token"
+                                onClick={() => handleDeleteToken(token)}
+                                className="action-btn action-btn-delete"
+                                title="Delete Token Permanently"
                               >
-                                <i className="fas fa-ban"></i>
+                                <i className="fas fa-trash-alt"></i>
                               </Button>
-                            ) : (
-                              <Button
-                                variant="outline-success"
-                                size="sm"
-                                onClick={() => handleEnableToken(token)}
-                                className="action-btn"
-                                title="Enable Token"
-                              >
-                                <i className="fas fa-check"></i>
-                              </Button>
-                            )}
+                            </div>
                           </div>
                         </td>
                       </tr>
@@ -525,6 +602,69 @@ const TokenListPage = () => {
                 </>
               ) : (
                 'Enable Token'
+              )}
+            </Button>
+          </Modal.Footer>
+        </Modal>
+
+        {/* Delete Token Modal */}
+        <Modal show={showDeleteModal} onHide={() => setShowDeleteModal(false)} centered>
+          <Modal.Header closeButton>
+            <Modal.Title className="text-danger">
+              <i className="fas fa-exclamation-triangle me-2"></i>
+              Delete Token Permanently
+            </Modal.Title>
+          </Modal.Header>
+          <Modal.Body>
+            <Alert variant="danger" className="mb-3">
+              <strong>⚠️ WARNING:</strong> This action is IRREVERSIBLE and will permanently delete all data including:
+              <ul className="mb-0 mt-2">
+                <li>Token tracking information</li>
+                <li>All historical OHLCV data</li>
+                <li>All indicator states (EMA, VWAP, RSI, etc.)</li>
+                <li>All alerts and metadata</li>
+              </ul>
+            </Alert>
+            <p className="mb-3">
+              You are about to permanently delete <strong className="text-danger">{selectedToken?.symbol}</strong> ({selectedToken?.name})
+            </p>
+            <Form.Group>
+              <Form.Label>
+                Type <strong className="text-danger">{selectedToken?.symbol}</strong> to confirm deletion:
+              </Form.Label>
+              <Form.Control
+                type="text"
+                value={deleteConfirmation}
+                onChange={(e) => setDeleteConfirmation(e.target.value)}
+                placeholder={`Type ${selectedToken?.symbol} to confirm`}
+                className="token-list-input"
+                autoComplete="off"
+              />
+            </Form.Group>
+          </Modal.Body>
+          <Modal.Footer>
+            <Button 
+              variant="secondary" 
+              onClick={() => setShowDeleteModal(false)}
+              disabled={deleteLoading}
+            >
+              Cancel
+            </Button>
+            <Button 
+              variant="danger" 
+              onClick={confirmDeleteToken}
+              disabled={deleteLoading || deleteConfirmation !== selectedToken?.symbol}
+            >
+              {deleteLoading ? (
+                <>
+                  <Spinner animation="border" size="sm" className="me-2" />
+                  Deleting...
+                </>
+              ) : (
+                <>
+                  <i className="fas fa-trash-alt me-2"></i>
+                  Delete Permanently
+                </>
               )}
             </Button>
           </Modal.Footer>

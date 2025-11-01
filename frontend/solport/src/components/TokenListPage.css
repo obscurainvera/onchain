@@ -378,6 +378,23 @@
   align-items: center;
 }
 
+.action-btn-wrapper {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+}
+
+.action-btn-label {
+  color: rgba(255, 255, 255, 0.7);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  line-height: 1;
+  min-height: 10px;
+}
+
 .action-btn {
   width: 32px !important;
   height: 32px !important;
@@ -398,16 +415,52 @@
   transform: translateY(-1px) !important;
 }
 
-/* Enable button specific styling */
-.action-btn.btn-outline-success {
+/* DexScreener button - Blue */
+.action-btn-dexscreener {
+  border-color: rgba(13, 202, 240, 0.3) !important;
+  color: rgba(13, 202, 240, 0.9) !important;
+}
+
+.action-btn-dexscreener:hover {
+  background-color: rgba(13, 202, 240, 0.1) !important;
+  border-color: rgba(13, 202, 240, 0.6) !important;
+  color: rgba(13, 202, 240, 1) !important;
+}
+
+/* Disable button - Yellow/Orange Warning */
+.action-btn-disable {
+  border-color: rgba(255, 193, 7, 0.3) !important;
+  color: rgba(255, 193, 7, 0.9) !important;
+}
+
+.action-btn-disable:hover {
+  background-color: rgba(255, 193, 7, 0.1) !important;
+  border-color: rgba(255, 193, 7, 0.6) !important;
+  color: rgba(255, 193, 7, 1) !important;
+}
+
+/* Enable button - Green */
+.action-btn-enable {
   border-color: rgba(25, 135, 84, 0.3) !important;
   color: rgba(25, 135, 84, 0.9) !important;
 }
 
-.action-btn.btn-outline-success:hover {
+.action-btn-enable:hover {
   background-color: rgba(25, 135, 84, 0.1) !important;
-  border-color: rgba(25, 135, 84, 0.5) !important;
+  border-color: rgba(25, 135, 84, 0.6) !important;
   color: rgba(25, 135, 84, 1) !important;
+}
+
+/* Delete button - Red Danger */
+.action-btn-delete {
+  border-color: rgba(220, 53, 69, 0.3) !important;
+  color: rgba(220, 53, 69, 0.9) !important;
+}
+
+.action-btn-delete:hover {
+  background-color: rgba(220, 53, 69, 0.1) !important;
+  border-color: rgba(220, 53, 69, 0.6) !important;
+  color: rgba(220, 53, 69, 1) !important;
 }
 
 .action-btn i {
@@ -615,8 +668,18 @@
   }
   
   .action-buttons {
-    flex-direction: column;
-    gap: 4px;
+    flex-direction: row;
+    flex-wrap: wrap;
+    gap: 6px;
+    justify-content: center;
+  }
+  
+  .action-btn-wrapper {
+    gap: 2px;
+  }
+  
+  .action-btn-label {
+    font-size: 9px;
   }
   
   .action-btn {
